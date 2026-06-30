@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-density="comfortable">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sample Grid — steps × prompts</title>
+  <style>
+{{ css }}
+/* Build-injected (override the CSS defaults): detected AR (D-11), the CLI cell
+   size (D-08), and the prompt-column count for the grid template. */
+:root {
+  --cell-ar: {{ cell_ar_css }};
+  --cell-size: {{ cell_size_px }}px;
+  --n-cols: {{ n_cols }};
+}
+  </style>
+</head>
+<body>
+  <div class="grid-scroll">
+    <div class="grid" role="grid" aria-label="Model samples — steps as rows, prompts as columns">
+      {# Corner cell + column (prompt) headers — sticky top #}
+      <div class="corner" role="columnheader">step ╲ prompt</div>
+      {% for prompt in prompts %}
+      <div class="col-header" role="columnheader" title="{{ prompt }}" aria-label="{{ prompt }}">{{ prompt }}</div>
+      {% endfor %}
+
+      {# One dense row per step; row-header (left, sticky) then a cell per prompt #}
+      {% for row in rows %}
+      <div class="row-header" role="rowheader">{{ row.step }}</div>
+      {% for item in row.cells %}
+        {% if item.cell.state == POPULATED %}
+      <a class="cell" href="{{ url(item.cell.sample) }}" target="_blank" rel="noopener noreferrer"
+         title="step {{ row.step }} · {{ item.prompt }}">
+        <img src="{{ url(item.cell.sample) }}" alt="step {{ row.step }}, {{ item.prompt }}"
+             loading="lazy" decoding="async">
+      </a>
+        {% else %}
+      <div class="cell cell--missing" title="No sample for step {{ row.step }} · {{ item.prompt }}">—</div>
+        {% endif %}
+      {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+</body>
+</html>

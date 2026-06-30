@@ -31,3 +31,22 @@ def test_build_writes_html(dense_sample_folder: Path, tmp_path: Path) -> None:
 
     html = index_html.read_text(encoding="utf-8")
     assert html.count("<img") == 6, f"expected 6 <img tags, found {html.count('<img')}"
+
+
+def test_build_empty_folder(tmp_path: Path) -> None:
+    """Building an empty folder writes a valid empty-state page and exits 0."""
+    from sample_grid.cli.main import app
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    out = tmp_path / "out"
+
+    result = runner.invoke(
+        app, ["build", str(empty), "-o", str(out), "--no-open"]
+    )
+
+    assert result.exit_code == 0, result.output
+
+    index_html = out / "grid-output" / "index.html"
+    assert index_html.exists(), f"expected {index_html} to be written"
+    assert "No samples found" in index_html.read_text(encoding="utf-8")
