@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sample-html-generator"
+version = "0.1.0"
+description = "Video-first model-comparison grid builder — renders a Steps x Prompts grid of generative-model samples to a self-contained HTML page."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "jinja2>=3.1",
+    "typer>=0.15",
+    "pillow>=11",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+]
+
+[project.scripts]
+grid = "sample_grid.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["sample_grid"]
+
+# Ensure non-Python template/CSS data ships inside the wheel so an installed
+# `grid` console script can locate its Jinja2 templates and client assets.
+[tool.hatch.build.targets.wheel.force-include]
+"sample_grid/render/templates" = "sample_grid/render/templates"
+"sample_grid/render/client" = "sample_grid/render/client"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
