@@ -1,7 +1,29 @@
-/* Phase-1 grid skeleton — structure-focused. Full theme/density token sets,
-   sticky positioning shadows, and truncation polish arrive in Plan 03. This
-   file establishes a correct CSS-Grid lattice + cell box on a dark eval ground. */
+/* Phase-1 grid styling — the FULL UI-SPEC token palette (dark + light theme,
+   comfortable + compact density), sticky two-axis headers with a scroll-shadow
+   cue, prompt truncation, focus rings, and the pinned theme/density toggle bar.
+   Every token is a plain CSS custom property so P3 (video), P4 (live) and P5
+   (freeze) reuse them unchanged. The artifact must open from file:// with no
+   server — there is no @import and no web-font fetch. */
 
+/* ── Static tokens (theme/density-independent) ───────────────────────────── */
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+  --weight-regular: 400;
+  --weight-semibold: 600;
+  --radius-cell: 3px;
+  --radius-control: 6px;
+  --ring-width: 2px;
+  --ring-offset: 2px;
+  --z-cell: 1;
+  --z-header: 20;
+  --z-corner: 30;
+  --z-toggle: 40;
+  --z-tooltip: 50;
+  --transition: 120ms ease;
+}
+
+/* ── Theme tokens — dark is the default eval ground (D-01) ────────────────── */
 :root,
 [data-theme="dark"] {
   --ground: #0e0f11;
@@ -14,15 +36,55 @@
   --missing-label: #5c636b;         /* faint em-dash + coordinate caption     */
   --broken-accent: #e0a458;         /* warm amber border + ⚠ glyph (status)  */
   --broken-fill: rgba(224, 164, 88, 0.07);  /* subtle amber wash behind broken */
+  --accent: #4f93ce;                /* interactive affordance ONLY (D-01)     */
+  --accent-contrast: #0e0f11;
+  --focus-ring: #6db0ec;
+  --shadow: rgba(0, 0, 0, 0.55);    /* drop shadow under sticky headers       */
 }
 
+/* Light theme (toggle target). Placed AFTER dark so it overrides the :root
+   defaults via source order when data-theme="light" is set. */
+[data-theme="light"] {
+  --ground: #f4f5f6;
+  --header-surface: #e9ebed;
+  --cell-surface: #ffffff;
+  --text: #1a1c1e;
+  --text-muted: #5f656b;
+  --hairline: rgba(0, 0, 0, 0.08);
+  --missing-stroke: #c2c7cc;
+  --missing-label: #9aa0a6;
+  --broken-accent: #b9701f;
+  --broken-fill: rgba(185, 112, 31, 0.08);
+  --accent: #2f6fb0;
+  --accent-contrast: #ffffff;
+  --focus-ring: #2f6fb0;
+  --shadow: rgba(0, 0, 0, 0.18);
+}
+
+/* ── Density tokens — comfortable is the default (D-02) ───────────────────── */
 :root,
 [data-density="comfortable"] {
   --gutter: 16px;
-  --cell-size: 240px;       /* overridden by build-injected :root (D-08) */
+  --cell-size: 240px;       /* overridden by build-injected :root (CLI, D-08) */
   --row-header-w: 96px;
   --header-pad-x: 12px;
   --header-pad-y: 8px;
+  --placeholder-pad: 8px;
+  --header-font-size: 13px;
+}
+
+/* Compact. Scoped `:root[data-density="compact"]` (specificity 0,2,0) so its
+   --cell-size beats the build-injected `:root` override (0,1,0) — the CLI
+   --cell-size stays authoritative for COMFORTABLE only (D-08), while compact
+   deliberately steps down to 144px. */
+:root[data-density="compact"] {
+  --gutter: 8px;
+  --cell-size: 144px;
+  --row-header-w: 64px;
+  --header-pad-x: 8px;
+  --header-pad-y: 4px;
+  --placeholder-pad: 8px;
+  --header-font-size: 12px;
 }
 
 * {
@@ -33,9 +95,78 @@ body {
   margin: 0;
   background: var(--ground);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-sans);
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  body {
+    transition: background var(--transition), color var(--transition);
+  }
+}
+
+/* ── Pinned theme/density toggle bar (D-03) ──────────────────────────────── */
+/* Fixed top-right on the header surface, reachable while scrolling (z 40). */
+.toggle-bar {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: var(--z-toggle);
+  display: flex;
+  gap: 8px;
+  padding: 8px;
+  background: var(--header-surface);
+  border-radius: var(--radius-control);
+  box-shadow: 0 2px 8px -2px var(--shadow);
+}
+
+.toggle-group {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.toggle-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  align-self: center;
+  padding-right: 4px;
+}
+
+.toggle-seg {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1.4;
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .toggle-seg {
+    transition: background var(--transition), color var(--transition);
+  }
+}
+
+.toggle-seg:hover {
+  color: var(--text);
+  background: var(--hairline);
+}
+
+/* Active/selected segment — the one place (besides focus + hover ring) accent
+   is allowed (UI-SPEC Color: accent reserved for interactive affordance). */
+.toggle-seg[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.toggle-seg:focus-visible {
+  outline: var(--ring-width) solid var(--focus-ring);
+  outline-offset: var(--ring-offset);
+}
+
+/* ── Scroll container + grid lattice ─────────────────────────────────────── */
 /* Exactly one scroll container owns overflow (sticky correctness, Pitfall 3). */
 .grid-scroll {
   overflow: auto;
@@ -52,27 +183,34 @@ body {
   align-items: start;
 }
 
+/* ── Sticky two-axis headers (GRID-03) ───────────────────────────────────── */
+/* Corner sits above BOTH header axes at their intersection (z 30 > 20). Each
+   header carries an always-on hairline as the CSS-only separator fallback; the
+   soft scroll-shadow below is a progressive enhancement. */
 .corner {
   position: sticky;
   top: 0;
   left: 0;
-  z-index: 30;
+  z-index: var(--z-corner);
   background: var(--header-surface);
   color: var(--text-muted);
   padding: var(--header-pad-y) var(--header-pad-x);
   font-size: 11px;
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
 }
 
 .col-header {
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: var(--z-header);
   background: var(--header-surface);
   color: var(--text);
   padding: var(--header-pad-y) var(--header-pad-x);
-  font-size: 13px;
-  font-weight: 600;
-  /* GRID-04: truncate one line; full text via the title attribute. */
+  font-size: var(--header-font-size);
+  font-weight: var(--weight-semibold);
+  border-bottom: 1px solid var(--hairline);
+  /* GRID-04: truncate one line; full text via the title/aria-label attribute. */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -81,25 +219,62 @@ body {
 .row-header {
   position: sticky;
   left: 0;
-  z-index: 20;
+  z-index: var(--z-header);
   background: var(--header-surface);
   color: var(--text);
   padding: var(--header-pad-y) var(--header-pad-x);
-  font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
-  font-size: 14px;
-  font-weight: 600;
+  /* Mono so step digits align across rows (UI-SPEC Typography: axis number). */
+  font-family: var(--font-mono);
+  font-size: var(--header-font-size);
+  font-weight: var(--weight-semibold);
+  border-right: 1px solid var(--hairline);
   display: flex;
   align-items: center;
 }
 
+/* Shadow-on-scroll cue (progressive enhancement). The scroll container gains
+   .is-scrolled-y / .is-scrolled-x (toggled by grid.js); the soft --shadow is
+   added only once content scrolls under the headers. Gated by reduced-motion so
+   there is no transition flash; the always-on hairline above is the fallback. */
+@media (prefers-reduced-motion: no-preference) {
+  .col-header,
+  .row-header,
+  .corner {
+    transition: box-shadow var(--transition);
+  }
+  .grid-scroll.is-scrolled-y .col-header,
+  .grid-scroll.is-scrolled-y .corner {
+    box-shadow: 0 6px 12px -6px var(--shadow);
+  }
+  .grid-scroll.is-scrolled-x .row-header,
+  .grid-scroll.is-scrolled-x .corner {
+    box-shadow: 6px 0 12px -6px var(--shadow);
+  }
+  .grid-scroll.is-scrolled-x.is-scrolled-y .corner {
+    box-shadow: 6px 6px 12px -6px var(--shadow);
+  }
+}
+
+/* ── Cell box ────────────────────────────────────────────────────────────── */
 /* Generic cell box — a video element (P3) must drop into this same box
    unchanged, so no image-only assumptions live on .cell itself (Pitfall 6). */
 .cell {
   aspect-ratio: var(--cell-ar);
   background: var(--cell-surface);
-  border-radius: 3px;
+  border-radius: var(--radius-cell);
   overflow: hidden;
   display: block;
+}
+
+/* Populated cells are anchors (click-to-open native, D-12): hint with a
+   zoom-in cursor; placeholders below reset cursor to default. */
+a.cell {
+  cursor: zoom-in;
+}
+
+a.cell:focus-visible {
+  outline: var(--ring-width) solid var(--focus-ring);
+  outline-offset: var(--ring-offset);
 }
 
 .cell img {
@@ -126,7 +301,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 8px;
+  padding: var(--placeholder-pad);
   text-align: center;
   cursor: default;
 }

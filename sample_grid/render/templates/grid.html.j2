@@ -16,6 +16,23 @@
   </style>
 </head>
 <body>
+  {# Pinned theme/density toggle (D-03). Buttons carry data-set="key:value" +
+     aria-pressed; grid.js (inlined near </body>) wires them and persists the
+     choice to localStorage. With JS disabled the page keeps the dark/comfortable
+     defaults baked into the CSS :root — the toggle simply does nothing. #}
+  <div class="toggle-bar">
+    <div class="toggle-group" role="group" aria-label="Theme">
+      <span class="toggle-label">Theme</span>
+      <button type="button" class="toggle-seg" data-set="theme:dark" aria-pressed="true">Dark</button>
+      <button type="button" class="toggle-seg" data-set="theme:light" aria-pressed="false">Light</button>
+    </div>
+    <div class="toggle-group" role="group" aria-label="Density">
+      <span class="toggle-label">Density</span>
+      <button type="button" class="toggle-seg" data-set="density:comfortable" aria-pressed="true">Comfortable</button>
+      <button type="button" class="toggle-seg" data-set="density:compact" aria-pressed="false">Compact</button>
+    </div>
+  </div>
+
   <div class="grid-scroll">
     <div class="grid" role="grid" aria-label="Model samples — steps as rows, prompts as columns">
       {# Corner cell + column (prompt) headers — sticky top #}

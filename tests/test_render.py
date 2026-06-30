@@ -55,6 +55,67 @@ def _normalize_urls(html: str) -> str:
     return _SRC_HREF.sub(r'\1="@@"', html)
 
 
+def _css_rule(html: str, selector: str) -> str:
+    """Return the body of the first top-of-line CSS rule for ``selector``.
+
+    Anchored to start-of-line (MULTILINE) so the main ``.col-header { … }`` block
+    is matched and the later compound rules (e.g. ``.is-scrolled-y .col-header``)
+    are not.
+    """
+    m = re.search(
+        r"^" + re.escape(selector) + r"\s*\{([^}]*)\}", html, re.MULTILINE
+    )
+    assert m, f"no CSS rule for {selector!r} in rendered output"
+    return m.group(1)
+
+
+def test_sticky_headers_present() -> None:
+    """GRID-03: the inlined CSS pins column headers to the top, row headers to
+    the left, and the corner to BOTH — layered corner(30) > headers(20)."""
+    grid = GridModel(
+        row_values=[100],
+        col_values=["p1"],
+        cells=[[Cell(CellState.MISSING)]],
+        cell_ar=(16, 9),
+    )
+    html = render(grid, RelativeResolver())
+
+    col = _css_rule(html, ".col-header")
+    assert "position: sticky" in col and "top: 0" in col
+
+    row = _css_rule(html, ".row-header")
+    assert "position: sticky" in row and "left: 0" in row
+
+    corner = _css_rule(html, ".corner")
+    assert "position: sticky" in corner
+    assert "top: 0" in corner and "left: 0" in corner
+
+    # Z-index layering: corner above the header axes, toggle bar above the grid.
+    assert "--z-header: 20" in html
+    assert "--z-corner: 30" in html
+    assert "--z-toggle: 40" in html
+
+
+def test_prompt_truncation_title() -> None:
+    """GRID-04: a long prompt truncates to one line (ellipsis class) while the
+    FULL text is exposed in both ``title`` and ``aria-label`` on the header."""
+    long_prompt = "a sweeping cinematic establishing shot of " * 4
+    grid = GridModel(
+        row_values=[100],
+        col_values=[long_prompt],
+        cells=[[Cell(CellState.MISSING)]],
+        cell_ar=(16, 9),
+    )
+    html = render(grid, RelativeResolver())
+
+    # The header carries the truncation class (which owns the ellipsis CSS)...
+    assert "col-header" in html
+    assert "text-overflow: ellipsis" in _css_rule(html, ".col-header")
+    # ...and the full prompt is available, unclipped, on hover + to a SR.
+    assert f'title="{long_prompt}"' in html
+    assert f'aria-label="{long_prompt}"' in html
+
+
 def test_missing_vs_broken_distinct() -> None:
     """D-09/D-10: missing and broken cells differ on class AND glyph, and neither
     is a clickable media cell (no <a>, no <img>)."""
