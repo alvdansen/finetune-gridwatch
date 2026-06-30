@@ -175,6 +175,56 @@ def test_prompt_html_escaped(xss_prompt_index) -> None:
     assert "<b>" not in html    # no raw injected element anywhere
 
 
+def test_toggle_js_inlined_offline_safe() -> None:
+    """The theme/density toggle JS is inlined verbatim (localStorage + data-set
+    wiring intact) AND the artifact carries NO server wiring — proving it is a
+    self-contained, file://-openable P1 page (live=False, no EventSource)."""
+    grid = GridModel(
+        row_values=[100],
+        col_values=["p1"],
+        cells=[[Cell(CellState.MISSING)]],
+        cell_ar=(16, 9),
+    )
+    html = render(grid, RelativeResolver())
+
+    # The inlined script must be present and functional (not entity-mangled).
+    assert "localStorage" in html
+    assert "data-set" in html
+    assert "addEventListener" in html
+    # A trusted static <script> must survive autoescape verbatim — the JS uses
+    # `scrollTop > 0`, which would be broken as `&gt;` inside a <script>.
+    assert "scrollTop > 0" in html
+    assert "&gt; 0" not in html
+    # No server / live-reload surface leaks into the Phase-1 artifact.
+    assert "EventSource" not in html
+    assert "LIVE_ENDPOINT" not in html
+
+
+def test_click_to_open_anchor() -> None:
+    """D-12: every POPULATED cell is an <a target=_blank rel=noopener noreferrer>
+    (click-to-open native), while missing/broken placeholders are NOT anchors."""
+    grid = GridModel(
+        row_values=[100],
+        col_values=["p1", "p2", "p3"],
+        cells=[[
+            Cell(CellState.POPULATED, sample=_sample("p1/img.png", step=100, prompt="p1")),
+            Cell(CellState.MISSING),
+            Cell(CellState.BROKEN, sample=_sample("p3/bad.png", step=100, prompt="p3")),
+        ]],
+        cell_ar=(16, 9),
+    )
+    html = render(grid, RelativeResolver())
+
+    anchors = re.findall(r"<a\b[^>]*>", html)
+    # Exactly the one populated cell is an anchor.
+    assert len(anchors) == 1
+    a = anchors[0]
+    assert 'target="_blank"' in a
+    assert 'rel="noopener noreferrer"' in a
+    # The placeholders render but never as clickable media.
+    assert "cell--missing" in html and "cell--broken" in html
+
+
 def test_src_posix_separators() -> None:
     """Pitfall 5 / T-1-03: every emitted src uses forward slashes only."""
     grid = GridModel(

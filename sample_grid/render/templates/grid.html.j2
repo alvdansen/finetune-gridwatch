@@ -4,8 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sample Grid — steps × prompts</title>
+  {# css is a STATIC, trusted asset read from disk — emit it verbatim. Marking
+     it `safe` is NOT a T-1-01 regression: it carries no user data, and inside a
+     <style> block the browser does not decode HTML entities, so autoescaping the
+     font-family quotes (&#34;) would actually BREAK the CSS. All dynamic
+     prompt/filename interpolation below stays autoescaped. #}
   <style>
-{{ css }}
+{{ css | safe }}
 /* Build-injected (override the CSS defaults): detected AR (D-11), the CLI cell
    size (D-08), and the prompt-column count for the grid template. */
 :root {
@@ -71,5 +76,13 @@
       {% endfor %}
     </div>
   </div>
+
+  {# Inlined client JS (static, trusted) — marked `safe` for the same reason as
+     css above: inside a <script> block the browser does not decode entities, so
+     autoescaping its `>` / `"` would break the script. It is vanilla and
+     file://-safe — NO EventSource / no server wiring (live=False in P1). #}
+  <script>
+{{ js | safe }}
+  </script>
 </body>
 </html>

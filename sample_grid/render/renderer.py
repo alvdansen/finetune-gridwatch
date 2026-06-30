@@ -5,7 +5,7 @@ and never branches on mode — it only consumes a ``GridModel`` and calls
 ``resolver.url(sample)``. That purity is what guarantees the P4 (Served) / P5
 (Inline) resolver swap with zero renderer change.
 
-The ``live`` flag is always ``False`` in P1 (no EventSource / no server). Keeping
+The ``live`` flag is always ``False`` in P1 (no live-reload / no server). Keeping
 it in the signature means P4 flips it to ``True`` with no signature change.
 """
 from __future__ import annotations
@@ -48,8 +48,12 @@ def render(
     )
     template = env.get_template("grid.html.j2")
 
-    # Inline the CSS so the artifact is self-contained from file:// (no fetch).
+    # Inline the CSS and JS so the artifact is self-contained from file:// (no
+    # fetch). grid.js is the ONLY client JS in P1: a vanilla theme/density toggle
+    # + sticky-shadow cue, deliberately free of any live-reload / server wiring
+    # (live is always False here; P4 adds the served path with no signature change).
     css = (_CLIENT_DIR / "grid.css").read_text(encoding="utf-8")
+    js = (_CLIENT_DIR / "grid.js").read_text(encoding="utf-8")
 
     # Prezip the dense lattice into (step, [(prompt, cell), ...]) rows so the
     # template stays free of index gymnastics.
@@ -68,6 +72,7 @@ def render(
         live=live,
         cell_size_px=cell_size_px,
         css=css,
+        js=js,
         cell_ar_css=_aspect_ratio_css(grid.cell_ar),
         n_cols=len(grid.col_values),
         POPULATED=CellState.POPULATED,
