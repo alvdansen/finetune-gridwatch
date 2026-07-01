@@ -37,6 +37,28 @@ def _write_png(
     Image.new("RGB", size, color).save(path, format="PNG")
 
 
+# ---------------------------------------------------------------------------
+# Video fixtures (Phase 3 / MEDIA-01). Two tiny SILENT clips committed under
+# tests/fixtures/ — a real ≤1s H.264 mp4 and a real VP9 webm. Unit tests only
+# inspect the file SUFFIX (never decode), but the clips are genuine playable
+# media so they also serve the Plan 02/03/04 manual browser protocols.
+# ---------------------------------------------------------------------------
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+TINY_MP4 = FIXTURES_DIR / "tiny.mp4"
+TINY_WEBM = FIXTURES_DIR / "tiny.webm"
+
+
+def _write_bytes(path: Path, data: bytes) -> None:
+    """Write raw bytes to ``path``, creating parents (mirrors ``_write_png``)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def _copy_fixture(src: Path, dest: Path) -> None:
+    """Copy a committed fixture clip into a tmp sample tree beside the PNGs."""
+    _write_bytes(dest, src.read_bytes())
+
+
 def _write_dense(outputs: Path) -> None:
     """Populate every (prompt, step) coordinate under ``outputs`` with a valid PNG."""
     for pi, prompt in enumerate(PROMPTS):
@@ -316,6 +338,43 @@ def structural_subfolder_folder(tmp_path: Path) -> Path:
     return outputs
 
 
+# ---------------------------------------------------------------------------
+# Video-media fixtures (Phase 3 / MEDIA-01 · MEDIA-05) — real clips dropped into
+# a tmp sample tree so the scan-picks-up-video and mixed-grid contracts run
+# against the same allowlist/confine path the images use.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def video_sample_folder(tmp_path: Path) -> Path:
+    """A folder with a ``.mp4`` clip beside ``.png`` images AND a ``.json`` sidecar.
+
+    Proves ``Scanner().scan`` picks up video via the union media allowlist while
+    the DISJOINT ``SIDECAR_EXTENSIONS`` keeps the ``.json`` out of the media
+    index (Pitfall 6). Returns the scan root.
+    """
+    outputs = tmp_path / "video_outputs"
+    prompt = PROMPTS[0]
+    _write_png(outputs / prompt / "step_200.png", (40, 60, 90))
+    _copy_fixture(TINY_MP4, outputs / prompt / "step_600.mp4")
+    # A sidecar in the same folder must NEVER be surfaced as a media cell.
+    (outputs / prompt / "step_600.json").write_text(
+        json.dumps({"step": 600, "prompt": prompt}), encoding="utf-8"
+    )
+    return outputs
+
+
+@pytest.fixture
+def mixed_media_folder(tmp_path: Path) -> Path:
+    """A single-prompt folder mixing an image, an mp4, and a webm across steps."""
+    outputs = tmp_path / "mixed"
+    prompt = PROMPTS[0]
+    _write_png(outputs / prompt / "step_200.png", (40, 60, 90))
+    _copy_fixture(TINY_MP4, outputs / prompt / "step_600.mp4")
+    _copy_fixture(TINY_WEBM, outputs / prompt / "step_1000.webm")
+    return outputs
+
+
 @pytest.fixture
 def xss_prompt_index(tmp_path: Path) -> SampleIndex:
     """A hand-built index whose prompt dimension carries HTML metacharacters.
@@ -331,6 +390,22 @@ def xss_prompt_index(tmp_path: Path) -> SampleIndex:
             id="safe_prompt/step_100.png",
             path=img,
             media_type="image",
+            dims={"step": 100, "prompt": XSS_PROMPT},
+        )
+    ]
+
+
+@pytest.fixture
+def xss_video_index(tmp_path: Path) -> SampleIndex:
+    """Same shape as ``xss_prompt_index`` but the malicious-prompt sample is a
+    VIDEO — proving the render video branch is autoescaped exactly like image."""
+    clip = tmp_path / "safe_prompt" / "step_100.mp4"
+    _copy_fixture(TINY_MP4, clip)
+    return [
+        Sample(
+            id="safe_prompt/step_100.mp4",
+            path=clip,
+            media_type="video",
             dims={"step": 100, "prompt": XSS_PROMPT},
         )
     ]

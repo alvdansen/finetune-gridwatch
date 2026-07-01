@@ -37,11 +37,13 @@ class FakeResolver:
         return "SENTINEL_URL"
 
 
-def _sample(rel_id: str, *, step: int, prompt: str) -> Sample:
+def _sample(
+    rel_id: str, *, step: int, prompt: str, media_type: str = "image"
+) -> Sample:
     return Sample(
         id=rel_id,
         path=Path(rel_id),
-        media_type="image",
+        media_type=media_type,
         dims={"step": step, "prompt": prompt},
     )
 
@@ -285,3 +287,105 @@ def test_src_posix_separators() -> None:
     assert srcs, "expected at least one src attribute"
     assert all("\\" not in s for s in srcs)
     assert any(s.startswith("./assets/") for s in srcs)
+
+
+# ── Video cells (Phase 3 / MEDIA-01 · MEDIA-05) ────────────────────────────
+
+
+def _video_grid() -> GridModel:
+    """A one-cell grid whose single POPULATED cell is a VIDEO sample."""
+    return GridModel(
+        row_values=[100],
+        col_values=["p1"],
+        cells=[[
+            Cell(
+                CellState.POPULATED,
+                sample=_sample("p1/clip.mp4", step=100, prompt="p1", media_type="video"),
+            ),
+        ]],
+        cell_ar=(16, 9),
+    )
+
+
+def test_video_cell_render_contract() -> None:
+    """MEDIA-01/D-01/D-10: a POPULATED video Sample renders as a
+    ``<div class="cell cell--video">`` carrying a lazy ``data-src`` first-frame
+    poster fragment (``#t=0.001``), and a ``<video muted playsinline loop
+    preload="none">`` with NO eager ``src`` — the Plan-02 lazy-load contract."""
+    html = render(_video_grid(), RelativeResolver())
+
+    assert 'class="cell cell--video"' in html
+    # Poster is the video's OWN first frame via the #t= media fragment on data-src.
+    m = re.search(r'data-src="([^"]*)"', html)
+    assert m, "expected a data-src on the video cell"
+    assert m.group(1).endswith("#t=0.001")
+
+    # The <video> element carries the lifecycle attrs and NO eager src.
+    vm = re.search(r"<video\b[^>]*>", html)
+    assert vm, "expected a <video> element"
+    vtag = vm.group(0)
+    assert "muted" in vtag
+    assert "playsinline" in vtag
+    assert "loop" in vtag
+    assert 'preload="none"' in vtag
+    assert 'src="' not in vtag  # client attaches src on first play (Plan 02)
+
+
+def test_video_play_overlay_and_popout() -> None:
+    """D-04/D-05: a resting video cell carries a ▶ play overlay and a ⧉ pop-out
+    ``<a target=_blank rel=noopener noreferrer>`` opening the CLEAN clip url (no
+    ``#t=`` fragment)."""
+    html = render(_video_grid(), RelativeResolver())
+
+    assert 'class="cell__play"' in html
+    assert "▶" in html
+
+    pm = re.search(r'<a\b[^>]*class="cell__popout"[^>]*>', html)
+    assert pm, "expected a cell__popout anchor"
+    a = pm.group(0)
+    assert 'target="_blank"' in a
+    assert 'rel="noopener noreferrer"' in a
+    hm = re.search(r'href="([^"]*)"', a)
+    assert hm, "pop-out must carry an href"
+    assert "#t=" not in hm.group(1)  # pop-out opens the raw clip, not the poster
+
+
+def test_video_prompt_html_escaped(xss_video_index) -> None:
+    """T-3-01: HTML metacharacters in a VIDEO sample's prompt render as literal
+    text (autoescape holds on the video branch exactly as on the image branch)."""
+    grid = build_grid(xss_video_index, GridConfig())
+    html = render(grid, RelativeResolver())
+
+    assert "&lt;b&gt;" in html
+    assert "&amp;" in html
+    assert "&#34;" in html
+    assert "<b>" not in html  # never a raw injected element
+
+
+def test_mixed_grid_image_cell_unchanged() -> None:
+    """MEDIA-05: in a mixed grid the image cell stays a plain ``<a><img>`` with
+    NO pop-out and NO play overlay; only the video cell carries those."""
+    grid = GridModel(
+        row_values=[100],
+        col_values=["p1", "p2"],
+        cells=[[
+            Cell(
+                CellState.POPULATED,
+                sample=_sample("p1/pic.png", step=100, prompt="p1", media_type="image"),
+            ),
+            Cell(
+                CellState.POPULATED,
+                sample=_sample("p2/clip.mp4", step=100, prompt="p2", media_type="video"),
+            ),
+        ]],
+        cell_ar=(16, 9),
+    )
+    html = render(grid, RelativeResolver())
+
+    # The image cell is still a plain anchor wrapping an <img>.
+    assert '<a class="cell"' in html
+    assert "<img" in html
+    # Exactly one video cell, and the pop-out / play overlay belong to it alone.
+    assert 'class="cell cell--video"' in html
+    assert html.count('class="cell__popout"') == 1
+    assert html.count('class="cell__play"') == 1
