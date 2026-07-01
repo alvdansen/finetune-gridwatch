@@ -6,6 +6,7 @@ file stem = step): ``outputs/<prompt>/step_<N>.png``.
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -164,6 +165,73 @@ def aitoolkit_style_folder(tmp_path: Path) -> Path:
     outputs = tmp_path / "aitoolkit"
     _write_png(outputs / "job" / "20260630__000000600_3.jpg", (30, 50, 70))
     _write_png(outputs / "job" / "20260630__000001200_3.jpg", (30, 50, 70))
+    return outputs
+
+
+# ---------------------------------------------------------------------------
+# Sidecar fixtures (Plan 02-03 / META-03) — the three real-world association
+# shapes plus the caption-file convention. Each folder carries image media the
+# scanner still finds AND a sidecar file the media scanner must never surface as
+# a cell. Alias keys are deliberately case-varied to exercise the alias tables.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sidecar_json_folder(tmp_path: Path) -> Path:
+    """Per-file ``<stem>.json`` sidecars next to the media (highest precedence).
+
+    Uses case-varied aliases (``Steps``/``noise_seed``/``positive_prompt``) so a
+    passing test also proves the alias tables are case-insensitive.
+    """
+    outputs = tmp_path / "sidecar_json"
+    _write_png(outputs / "a_lake" / "sample_1.png", (40, 60, 90))
+    (outputs / "a_lake" / "sample_1.json").write_text(
+        json.dumps({"Steps": 800, "noise_seed": 42, "positive_prompt": "a serene lake"}),
+        encoding="utf-8",
+    )
+    return outputs
+
+
+@pytest.fixture
+def sidecar_csv_folder(tmp_path: Path) -> Path:
+    """A ``metadata.csv`` keyed by ``file_name`` with a comma-containing prompt.
+
+    The prompt cell ``"a lake, at dusk, cinematic"`` proves ``csv.DictReader``
+    keeps the whole string intact (Pitfall 4 — never ``line.split(',')``).
+    """
+    outputs = tmp_path / "sidecar_csv"
+    _write_png(outputs / "run" / "img_0.png", (40, 60, 90))
+    _write_png(outputs / "run" / "img_1.png", (50, 70, 100))
+    csv_text = (
+        "file_name,step,seed,prompt\r\n"
+        'img_0.png,500,42,"a lake, at dusk, cinematic"\r\n'
+        'img_1.png,900,42,"a city, at night"\r\n'
+    )
+    (outputs / "run" / "metadata.csv").write_text(csv_text, encoding="utf-8")
+    return outputs
+
+
+@pytest.fixture
+def per_folder_meta_folder(tmp_path: Path) -> Path:
+    """A folder-level ``meta.json`` applying its dims to every media file in it."""
+    outputs = tmp_path / "per_folder"
+    _write_png(outputs / "a_lake" / "frame_a.png", (40, 60, 90))
+    _write_png(outputs / "a_lake" / "frame_b.png", (50, 70, 100))
+    (outputs / "a_lake" / "meta.json").write_text(
+        json.dumps({"global_step": 1200, "seed": 7, "prompt": "a serene lake"}),
+        encoding="utf-8",
+    )
+    return outputs
+
+
+@pytest.fixture
+def caption_txt_folder(tmp_path: Path) -> Path:
+    """A per-file ``<stem>.txt`` whose entire contents are the prompt (kohya style)."""
+    outputs = tmp_path / "caption"
+    _write_png(outputs / "shots" / "clip_1.png", (40, 60, 90))
+    (outputs / "shots" / "clip_1.txt").write_text(
+        "a lone figure on a snowy ridge, wide shot", encoding="utf-8"
+    )
     return outputs
 
 

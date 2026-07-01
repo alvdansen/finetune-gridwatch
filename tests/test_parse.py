@@ -154,3 +154,51 @@ def test_subfolder_extract(tmp_path: Path) -> None:
     assert out[deep_key]["step"].value == 500
     assert out[deep_key]["step"].source == "subfolder"
     assert out[deep_key]["prompt"].value == "a_city"
+
+
+# ---------------------------------------------------------------------------
+# Task 1: Scanner.scan_sidecars — surface sidecars WITHOUT polluting the media
+# index (META-03 blocker / Pitfall 6).
+# ---------------------------------------------------------------------------
+
+_SIDECAR_SUFFIXES = {".json", ".csv", ".jsonl", ".txt", ".caption"}
+
+
+def _seed_sidecar_folder(tmp_path: Path) -> Path:
+    """A single folder holding image media alongside all three sidecar shapes."""
+    folder = tmp_path / "run"
+    folder.mkdir()
+    (folder / "img_0.png").write_bytes(b"\x89PNG stub")
+    (folder / "img_1.png").write_bytes(b"\x89PNG stub")
+    (folder / "meta.json").write_text("{}", encoding="utf-8")
+    (folder / "metadata.csv").write_text("file_name\n", encoding="utf-8")
+    (folder / "cap.txt").write_text("a prompt", encoding="utf-8")
+    return folder
+
+
+def test_scan_sidecars(tmp_path: Path) -> None:
+    """``scan_sidecars`` surfaces .json/.csv/.txt sidecars, deterministically
+    posix-sorted, without needing the media allowlist."""
+    from sample_grid.core.scan import Scanner
+
+    _seed_sidecar_folder(tmp_path)
+    sidecars = Scanner().scan_sidecars(tmp_path)
+
+    assert sorted(p.name for p in sidecars) == ["cap.txt", "meta.json", "metadata.csv"]
+    # Deterministic posix-normalized order (mirrors Scanner.scan).
+    posix = [p.as_posix() for p in sidecars]
+    assert posix == sorted(posix)
+
+
+def test_sidecar_never_a_cell(tmp_path: Path) -> None:
+    """The media scan (Scanner.scan) excludes every sidecar file — sidecars never
+    enter the media SampleIndex (Pitfall 6)."""
+    from sample_grid.core.scan import Scanner
+
+    _seed_sidecar_folder(tmp_path)
+    media = Scanner().scan(tmp_path)
+
+    # Only image media, no sidecar suffix leaks in.
+    assert media, "expected the image media to still be discovered"
+    assert all(p.suffix.lower() not in _SIDECAR_SUFFIXES for p in media)
+    assert any(p.name == "img_0.png" for p in media)
