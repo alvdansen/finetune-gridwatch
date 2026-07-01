@@ -141,6 +141,64 @@ def _png(tmp_path: Path, name: str) -> Path:
     return p
 
 
+def test_no_alternates_for_seedless_duplicates(tmp_path: Path) -> None:
+    """WR-04: two samples at one coordinate with NO seed must NOT flag alternates.
+
+    Previously ``build_grid`` produced ``has_alternates=True`` /
+    ``alternate_seeds=[None, None]`` — a false eval-integrity badge implying
+    multiple seeds where none exist. Now a coordinate with zero distinct non-None
+    seeds yields ``has_alternates is False`` / ``alternate_seeds == []``.
+    """
+    index = [
+        Sample(id="p/b.png", path=_png(tmp_path, "p/b.png"),
+               media_type="image", dims={"step": 200, "prompt": "p"}),
+        Sample(id="p/a.png", path=_png(tmp_path, "p/a.png"),
+               media_type="image", dims={"step": 200, "prompt": "p"}),
+    ]
+
+    cell = build_grid(index, GridConfig()).cells[0][0]
+
+    assert cell.state == CellState.POPULATED
+    assert cell.has_alternates is False
+    assert cell.alternate_seeds == []
+
+
+def test_no_alternates_for_identical_seed_duplicates(tmp_path: Path) -> None:
+    """WR-04: two samples at one coordinate sharing a SINGLE seed must NOT flag
+    alternates — one distinct seed is not an alternate. Previously this rendered
+    ``alternate_seeds=[7, 7]`` / ``has_alternates=True``."""
+    index = [
+        Sample(id="p/first.png", path=_png(tmp_path, "p/first.png"),
+               media_type="image", dims={"step": 200, "prompt": "p", "seed": 7}),
+        Sample(id="p/second.png", path=_png(tmp_path, "p/second.png"),
+               media_type="image", dims={"step": 200, "prompt": "p", "seed": 7}),
+    ]
+
+    cell = build_grid(index, GridConfig()).cells[0][0]
+
+    assert cell.state == CellState.POPULATED
+    assert cell.has_alternates is False
+    assert cell.alternate_seeds == []
+
+
+def test_alternates_lists_distinct_seeds(tmp_path: Path) -> None:
+    """WR-04: two samples at one coordinate with DISTINCT seeds flag alternates,
+    listing exactly the distinct non-None seeds (winner included). Mirrors and
+    reinforces ``test_duplicate_lowest_seed``'s ``{7, 42}`` expectation."""
+    index = [
+        Sample(id="p/seed7.png", path=_png(tmp_path, "p/seed7.png"),
+               media_type="image", dims={"step": 200, "prompt": "p", "seed": 7}),
+        Sample(id="p/seed42.png", path=_png(tmp_path, "p/seed42.png"),
+               media_type="image", dims={"step": 200, "prompt": "p", "seed": 42}),
+    ]
+
+    cell = build_grid(index, GridConfig()).cells[0][0]
+
+    assert cell.state == CellState.POPULATED
+    assert cell.has_alternates is True
+    assert set(cell.alternate_seeds) == {7, 42}
+
+
 def test_duplicate_lowest_seed(tmp_path: Path) -> None:
     """D-10: duplicate coordinates resolve to the lowest numeric seed,
     deterministically; the winning cell flags alternates. D-09: the grid marks

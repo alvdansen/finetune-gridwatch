@@ -110,9 +110,14 @@ def build_grid(index: SampleIndex, config: GridConfig) -> GridModel:
     alternates: dict = {}
     for coord, samples in groups.items():
         by_coord[coord] = min(samples, key=lambda s: (_seed_key(s), s.id))
-        if len(samples) > 1:
-            # Retain every colliding seed for the D-09 in-page marker.
-            alternates[coord] = [s.dims.get("seed") for s in samples]
+        # WR-04: only mark alternates when the coordinate genuinely holds MORE
+        # THAN ONE DISTINCT non-None seed. A no-seed or same-seed duplicate must
+        # NOT fire the badge (the old unconditional list produced false
+        # [None, None] / [7, 7] alarms). The winner's own seed stays in the set
+        # (test_duplicate_lowest_seed pins {42, 7}).
+        distinct = sorted({s.dims.get("seed") for s in samples if s.dims.get("seed") is not None})
+        if len(distinct) > 1:
+            alternates[coord] = distinct
 
     # (a) Per-coordinate variance — any coordinate holding >1 DISTINCT non-None
     # seed. Classified in Python (never inferred in JS), independent of render.
