@@ -16,8 +16,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from sample_grid.core.parse.base import FieldValue
-from sample_grid.util.paths import to_posix
+from sample_grid.core.parse.base import FieldValue, rel_id_for
 
 # Full-segment structural recognizers (compiled at module scope, linear —
 # ReDoS-safe). A directory named ``step_500`` / ``steps-500`` → step; a
@@ -30,7 +29,16 @@ _CONF_PROMPT = 0.4
 
 
 class SubfolderExtractor:
-    """META-02: per-field detection from the folder structure (source=``subfolder``)."""
+    """META-02: per-field detection from the folder structure (source=``subfolder``).
+
+    Constructed with the scanned ``root`` so its output is keyed by the shared,
+    prompt-independent ``rel_id_for(file, root)`` token (not the detected prompt),
+    so a contradictory filename-vs-subfolder guess for one physical file merges
+    into ONE bucket and precedence arbitrates (closes WR-05).
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root)
 
     def extract(self, files: list[Path]) -> "dict[str, dict[str, FieldValue]]":
         out: dict[str, dict[str, FieldValue]] = {}
@@ -65,7 +73,8 @@ class SubfolderExtractor:
             if prompt is not None:
                 fields["prompt"] = FieldValue(prompt, "subfolder", _CONF_PROMPT)
 
-            rel_prompt = prompt if prompt is not None else file.parent.name
-            rel_id = to_posix(Path(rel_prompt) / file.name)
+            # Merge key is the stable per-file token — NOT the detected prompt.
+            # The prompt above flows on as an ordinary merged field (D-03).
+            rel_id = rel_id_for(file, self.root)
             out[rel_id] = fields
         return out

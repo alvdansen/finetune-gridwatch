@@ -28,7 +28,7 @@ import csv
 import json
 from pathlib import Path
 
-from sample_grid.core.parse.base import FieldValue
+from sample_grid.core.parse.base import FieldValue, rel_id_for
 from sample_grid.util.paths import confine, to_posix
 
 # Explicit trainer metadata is high-confidence by construction.
@@ -88,14 +88,20 @@ class SidecarExtractor:
     """META-03: per-field detection from sidecar files (source=``sidecar``).
 
     Constructed with the sidecar file list (from ``Scanner.scan_sidecars``) and
-    the scanned ``root`` used for confinement. ``extract`` associates each media
-    file to at most one sidecar and returns its fields keyed by the media's stable
-    posix ``rel_id`` (``"<parent_dir>/<file>"``) so the picker merges sidecar
-    fields onto the same file the filename/subfolder extractors produced.
+    the scanned ``root`` (used both for read confinement and as the base for the
+    shared merge key). ``extract`` associates each media file to at most one
+    sidecar and returns its fields keyed by the media's stable, prompt-independent
+    ``rel_id_for(media, root)`` token so the picker merges sidecar fields onto the
+    same bucket the filename/subfolder/template extractors produced — regardless
+    of which prompt any of them detected (WR-01).
     """
 
     def __init__(self, sidecar_files: "list[Path]", root: Path) -> None:
         self.sidecars = [Path(p) for p in sidecar_files]
+        # Unresolved root for the shared merge key (matches how the other
+        # extractors and the scanned media paths are rooted); the RESOLVED root is
+        # kept separately purely for filesystem confinement of sidecar reads.
+        self.root = Path(root)
         self._root_resolved = Path(root).resolve()
         self.skipped: list[str] = []
         self._csv_cache: dict[Path, dict] = {}
@@ -113,7 +119,11 @@ class SidecarExtractor:
             fields = self._map_fields(raw)
             if not fields:
                 continue
-            rel_id = to_posix(Path(media.parent.name) / media.name)
+            # Shared, prompt-independent merge key (NOT media.parent.name) so
+            # sidecar fields land on the same bucket the filename/subfolder/
+            # template extractors produce — highest precedence D-03 override then
+            # actually arbitrates, even in ai-toolkit integer-index layouts (WR-01).
+            rel_id = rel_id_for(media, self.root)
             out[rel_id] = fields
         return out
 

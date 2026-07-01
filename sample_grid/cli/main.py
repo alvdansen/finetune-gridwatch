@@ -59,8 +59,8 @@ def _auto_parse(folder: Path, template: "str | None" = None):
     sidecar_files = Scanner().scan_sidecars(folder)
     extractors = [
         SidecarExtractor(sidecar_files, root=folder),
-        FilenameExtractor(),
-        SubfolderExtractor(),
+        FilenameExtractor(root=folder),
+        SubfolderExtractor(root=folder),
     ]
     if template:
         extractors.insert(0, TemplateParser(template, root=folder))

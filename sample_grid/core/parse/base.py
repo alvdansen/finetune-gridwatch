@@ -20,6 +20,33 @@ from sample_grid.core.model import Sample, SampleIndex
 from sample_grid.util.paths import to_posix
 
 
+def rel_id_for(file: "str | Path", root: "str | Path") -> str:
+    """The single stable per-file merge key every extractor keys on.
+
+    Returns ``to_posix(Path(file).relative_to(root))`` — the file's POSIX path
+    relative to the scan root. This token does NOT depend on any detected prompt,
+    so every extractor (filename / subfolder / sidecar / template) derives the
+    IDENTICAL key for the same physical file. Because the buckets always agree,
+    the prompt becomes an ordinary merged field arbitrated by ``SOURCE_PRECEDENCE``
+    (D-03) rather than a component of the key — the previously drift-prone contract
+    is now un-driftable (closes CR-01 / WR-01 / WR-05).
+
+    Defensive fallback: a file outside ``root`` (``relative_to`` raises
+    ``ValueError``) falls back to ``to_posix(Path(file))`` so the key is always
+    derived deterministically and never raises — the same guard TemplateParser
+    already used at template.py.
+
+    For flat two-segment ``<prompt>/<file>`` layouts pointed at their own folder,
+    this yields the identical ``<prompt>/<file>`` key the old prompt-derived
+    derivation produced, so pre-existing Samples are unchanged (no regression).
+    """
+    file = Path(file)
+    try:
+        return to_posix(file.relative_to(root))
+    except ValueError:
+        return to_posix(file)
+
+
 @runtime_checkable
 class Parser(Protocol):
     """Turns a list of discovered files into a SampleIndex (the Phase-1 seam)."""
@@ -32,11 +59,15 @@ class Extractor(Protocol):
     """The single per-source call-contract every detection source implements.
 
     ``extract`` maps a list of discovered files to a nested dict keyed first by
-    the stable posix ``rel_id`` (``"<prompt>/<file>"``), then by field name
-    (``step`` / ``prompt`` / ``seed`` / ``model`` / ``checkpoint`` / ``cfg``) to a
-    ``FieldValue`` carrying the value, its ``source`` string, and a confidence.
-    Declared here — not as prose — so Plans 02-03 (sidecar) and 02-04 (template)
-    plug in against a named signature without editing this module.
+    the stable per-file ``rel_id`` — the file's POSIX path relative to the scan
+    root, produced by the shared ``rel_id_for(file, root)`` helper — then by field
+    name (``step`` / ``prompt`` / ``seed`` / ``model`` / ``checkpoint`` / ``cfg``)
+    to a ``FieldValue`` carrying the value, its ``source`` string, and a
+    confidence. The key is NOT prompt-derived: because every extractor computes it
+    identically from ``rel_id_for``, all sources land in the same merge bucket and
+    the prompt is arbitrated as an ordinary field by precedence (D-03). Declared
+    here — not as prose — so every detection source plugs in against one named
+    signature without editing this module.
     """
 
     def extract(self, files: list[Path]) -> "dict[str, dict[str, FieldValue]]": ...
@@ -111,9 +142,11 @@ def merge_fields(
 def _resolve_path(rel_id: str, files: list[Path]) -> "Path | None":
     """Map a ``rel_id`` back to the on-disk file that produced it.
 
-    ``rel_id``'s last segment is the file basename; the segment before it is the
-    detected prompt. Match on basename, breaking any ties with the parent-dir
-    name so identical basenames across prompt folders resolve unambiguously.
+    ``rel_id`` is the file's stable POSIX-relative-to-root token (from
+    ``rel_id_for``): its last segment is the file basename and the segment before
+    it is the file's real parent directory (no longer a detected prompt). Match on
+    basename, breaking any ties with the parent-dir name so identical basenames
+    across sibling folders resolve unambiguously.
     """
     target = Path(rel_id).name
     matches = [f for f in files if Path(f).name == target]

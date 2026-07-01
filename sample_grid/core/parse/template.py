@@ -32,7 +32,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from sample_grid.core.parse.base import FieldValue
+from sample_grid.core.parse.base import FieldValue, rel_id_for
 from sample_grid.util.paths import to_posix
 
 # Placeholder grammar: ``{name}`` (a field) or the ``{*}`` ignore token.
@@ -113,5 +113,8 @@ class TemplateParser:
                     continue
                 coerced = int(value) if name in _NUMERIC else value
                 fields[name] = FieldValue(coerced, "template", _CONF_HIGH)
-            out[rel] = fields
+            # Derive the OUTPUT key from the shared helper — the single source of
+            # truth for the merge key (identical to ``rel`` matched above, but no
+            # longer an independent inline derivation that could drift, CR-01).
+            out[rel_id_for(file, self.root)] = fields
         return out

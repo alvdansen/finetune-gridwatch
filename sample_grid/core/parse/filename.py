@@ -22,7 +22,7 @@ import re
 from pathlib import Path
 
 from sample_grid.core.model import Sample, SampleIndex
-from sample_grid.core.parse.base import FieldValue
+from sample_grid.core.parse.base import FieldValue, rel_id_for
 from sample_grid.util.paths import to_posix
 
 _STEP_RE = re.compile(r"\d+")
@@ -57,7 +57,16 @@ _INT_FIELDS = {"step", "seed", "cfg"}
 
 
 class FilenameExtractor:
-    """META-01: per-field detection from the filename (source=``filename``)."""
+    """META-01: per-field detection from the filename (source=``filename``).
+
+    Constructed with the scanned ``root`` so its output is keyed by the shared,
+    prompt-independent ``rel_id_for(file, root)`` token (not the detected prompt),
+    guaranteeing it merges onto the same bucket every other extractor produces
+    for the same physical file (closes WR-01 / WR-05).
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root)
 
     def extract(self, files: list[Path]) -> "dict[str, dict[str, FieldValue]]":
         out: dict[str, dict[str, FieldValue]] = {}
@@ -89,8 +98,9 @@ class FilenameExtractor:
             if "prompt" not in fields:
                 fields["prompt"] = FieldValue(file.parent.name, "filename", _CONF_MED)
 
-            prompt = fields["prompt"].value
-            rel_id = to_posix(Path(str(prompt)) / file.name)
+            # Merge key is the stable per-file token — NOT the detected prompt.
+            # The prompt above flows on as an ordinary merged field (D-03).
+            rel_id = rel_id_for(file, self.root)
             out[rel_id] = fields
         return out
 
