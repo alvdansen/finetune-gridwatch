@@ -93,6 +93,40 @@ def test_build_silent(tmp_path: Path) -> None:
         assert warning not in result.output, f"build leaked warning: {warning!r}"
 
 
+def test_template_flag(tmp_path: Path) -> None:
+    """META-04 / D-06: ``--template`` is a first-class Option on BOTH ``detect``
+    and ``build``. ``detect`` reports axes derived from the template; ``build``
+    renders through the same grouping and stays CLI-silent (D-02)."""
+    from PIL import Image
+
+    from sample_grid.cli.main import app
+
+    folder = tmp_path / "tpl"
+    for step in (200, 600):
+        img = folder / "a_lake" / f"step_{step}_seed42.png"
+        img.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (32, 18), (10, 20, 30)).save(img, format="PNG")
+
+    tpl = "{prompt}/step_{step}_seed{seed}.png"
+
+    # detect prints template-derived axes.
+    d = runner.invoke(app, ["detect", str(folder), "--template", tpl])
+    assert d.exit_code == 0, d.output
+    assert "Rows (step): [200, 600]" in d.output
+    assert "Cols (prompt): ['a_lake']" in d.output
+
+    # build renders using the template grouping and leaks no warning strings.
+    out_dir = tmp_path / "out"
+    b = runner.invoke(
+        app,
+        ["build", str(folder), "-o", str(out_dir), "--no-open", "--template", tpl],
+    )
+    assert b.exit_code == 0, b.output
+    assert (out_dir / "grid-output" / "index.html").exists()
+    for warning in _WARNING_STRINGS:
+        assert warning not in b.output, f"build leaked warning: {warning!r}"
+
+
 def test_build_writes_html(dense_sample_folder: Path, tmp_path: Path) -> None:
     """`grid build` on a dense folder writes a browser-openable index.html.
 

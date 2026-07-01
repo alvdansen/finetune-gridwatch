@@ -19,6 +19,7 @@ from sample_grid.core.parse.base import AutoDetectParser
 from sample_grid.core.parse.filename import FilenameExtractor
 from sample_grid.core.parse.sidecar import SidecarExtractor
 from sample_grid.core.parse.subfolder import SubfolderExtractor
+from sample_grid.core.parse.template import TemplateParser
 from sample_grid.core.scan import Scanner
 from sample_grid.render.renderer import render
 from sample_grid.render.resolver import RelativeResolver
@@ -36,7 +37,7 @@ ASSETS_DIRNAME = "assets"
 _PREVIEW_LIMIT = 5
 
 
-def _auto_parse(folder: Path):
+def _auto_parse(folder: Path, template: "str | None" = None):
     """Run the shared auto-detect pipeline: scan → extract → merge.
 
     Returns ``(SampleIndex, DetectionReport)``. ``build`` discards the report
@@ -47,6 +48,12 @@ def _auto_parse(folder: Path):
     disjoint ``scan_sidecars`` walk) and listed first for readability; actual
     precedence (``sidecar > filename > subfolder``, D-03) is decided by
     ``SOURCE_PRECEDENCE`` in the merge, not list order.
+
+    When ``template`` is supplied (META-04 / D-06), a ``TemplateParser`` is added
+    as the highest-precedence source (``source="template"``, precedence 4). It is
+    NOT mutually exclusive with auto-detect: the template wins for the fields it
+    captures and the other extractors fill only the gaps (A1) — the fill-gaps
+    merge is the whole point of the override.
     """
     files = Scanner().scan(folder)
     sidecar_files = Scanner().scan_sidecars(folder)
@@ -55,6 +62,8 @@ def _auto_parse(folder: Path):
         FilenameExtractor(),
         SubfolderExtractor(),
     ]
+    if template:
+        extractors.insert(0, TemplateParser(template, root=folder))
     return AutoDetectParser(extractors).parse(files)
 
 
@@ -103,6 +112,11 @@ def build(
     cell_size: int = typer.Option(
         240, "--cell-size", help="Cell width in px (default Comfortable)."
     ),
+    template: str = typer.Option(
+        None,
+        "--template",
+        help="Override auto-detect: {prompt}/step_{step}_seed{seed}.mp4",
+    ),
 ) -> None:
     """Build a static Steps × Prompts grid from FOLDER.
 
@@ -121,7 +135,7 @@ def build(
     # DISCARDED here — `build` renders with best-guess detection and prints no
     # conflicts/skips/multi-seed warnings to the terminal (D-02). Inspection is
     # the explicit `detect` step; the artifact still carries the D-09 marker.
-    index, _report = _auto_parse(folder)
+    index, _report = _auto_parse(folder, template=template)
 
     # Empty-state: never emit a silent content-free grid (UI-SPEC).
     if not index:
@@ -158,6 +172,11 @@ def build(
 @app.command()
 def detect(
     folder: Path = typer.Argument(..., help="Folder of model samples to inspect."),
+    template: str = typer.Option(
+        None,
+        "--template",
+        help="Override auto-detect: {prompt}/step_{step}_seed{seed}.mp4",
+    ),
 ) -> None:
     """Preview auto-detection for FOLDER, then exit WITHOUT rendering (META-05 / D-01).
 
@@ -168,7 +187,7 @@ def detect(
     seed signals — per-coordinate multi-seed cells and cross-cell seed variance
     (D-09). It never writes an ``index.html``.
     """
-    index, report = _auto_parse(folder)
+    index, report = _auto_parse(folder, template=template)
 
     if not index:
         typer.echo(

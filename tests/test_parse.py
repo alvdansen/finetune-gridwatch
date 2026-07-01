@@ -406,3 +406,41 @@ def test_precedence_sidecar_wins(tmp_path: Path) -> None:
     assert index[0].dims["prompt"] == "a serene lake"
     # The disagreement on `step` is recorded in the report (D-04).
     assert any(fieldname == "step" for fieldname, _ in report.conflicts)
+
+
+# ---------------------------------------------------------------------------
+# Plan 02-04 Task 2: template wins for captured fields, auto-detect fills the
+# gaps end-to-end (A1 / D-06).
+# ---------------------------------------------------------------------------
+
+
+def test_template_precedence_fills_gaps(tmp_path: Path) -> None:
+    """A1: a template capturing step+prompt plus a sidecar providing seed →
+    merged dims use the TEMPLATE's step+prompt (template wins, precedence 4 over
+    sidecar's step=999) AND the sidecar's seed (a gap the template did not
+    capture is filled)."""
+    import json
+
+    from sample_grid.cli.main import _auto_parse
+
+    folder = tmp_path / "run"
+    (folder / "a_lake").mkdir(parents=True)
+    (folder / "a_lake" / "step_600.png").write_bytes(b"\x89PNG stub")
+    # Sidecar disagrees on step (999) and uniquely supplies seed (42).
+    (folder / "a_lake" / "step_600.json").write_text(
+        json.dumps({"step": 999, "seed": 42}), encoding="utf-8"
+    )
+
+    index, report = _auto_parse(
+        folder, template="{prompt}/step_{step}.png"
+    )
+
+    assert len(index) == 1
+    dims = index[0].dims
+    # Template wins the fields it captured (step=600 over sidecar's 999, prompt).
+    assert dims["step"] == 600
+    assert dims["prompt"] == "a_lake"
+    # ...and the sidecar fills the gap the template did not capture (seed).
+    assert dims["seed"] == 42
+    # The step disagreement (template 600 vs sidecar 999) is still counted (D-04).
+    assert any(fieldname == "step" for fieldname, _ in report.conflicts)
