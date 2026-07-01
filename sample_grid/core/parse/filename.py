@@ -29,8 +29,12 @@ _STEP_RE = re.compile(r"\d+")
 
 # Labeled-token regex (compiled at module scope, linear — no nested quantifiers
 # over .*, so it is ReDoS-safe on huge filenames, T-02-02). Case-insensitive.
+# A left token-boundary lookbehind ``(?<![A-Za-z0-9])`` requires each alias to
+# start a token, so ``sd`` cannot match mid-word and ``loss_d0``-style stems
+# (bare ``d`` alias removed entirely, WR-03) yield no spurious seed.
 _LABELED_RE = re.compile(
-    r"(step|steps|seed|sd|cfg|idx|sample|epoch|d)[ _\-]?(\d+)", re.IGNORECASE
+    r"(?<![A-Za-z0-9])(step|steps|seed|sd|cfg|idx|sample|epoch)[ _\-]?(\d+)",
+    re.IGNORECASE,
 )
 
 # Key → dims field. ``idx``/``sample`` surface as the prompt sample index.
@@ -40,7 +44,6 @@ _KEY_FIELD = {
     "epoch": "step",
     "seed": "seed",
     "sd": "seed",
-    "d": "seed",
     "cfg": "cfg",
     "idx": "prompt",
     "sample": "prompt",

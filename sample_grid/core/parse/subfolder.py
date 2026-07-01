@@ -20,9 +20,11 @@ from sample_grid.core.parse.base import FieldValue, rel_id_for
 
 # Full-segment structural recognizers (compiled at module scope, linear —
 # ReDoS-safe). A directory named ``step_500`` / ``steps-500`` → step; a
-# directory named ``seed_7`` / ``sd7`` / ``d42`` → seed.
+# directory named ``seed_7`` / ``sd7`` → seed. The bare ``d`` alias is removed
+# (WR-03): a folder named ``d42`` is too ambiguous to read as a seed and now
+# falls through to being treated as a prompt segment.
 _STEP_SEG = re.compile(r"(?:step|steps)[ _\-]?(\d+)", re.IGNORECASE)
-_SEED_SEG = re.compile(r"(?:seed|sd|d)[ _\-]?(\d+)", re.IGNORECASE)
+_SEED_SEG = re.compile(r"(?:seed|sd)[ _\-]?(\d+)", re.IGNORECASE)
 
 _CONF_STEP = 0.6
 _CONF_PROMPT = 0.4

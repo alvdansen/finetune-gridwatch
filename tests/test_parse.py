@@ -156,6 +156,35 @@ def test_subfolder_extract(tmp_path: Path) -> None:
     assert out[deep_key]["prompt"].value == "a_city"
 
 
+def test_seed_alias_no_false_positive(tmp_path: Path) -> None:
+    """WR-03: ordinary ``_d<digits>`` / dimension stems must NOT emit a seed.
+
+    The over-broad bare ``d`` seed alias (plus mid-word matches) made
+    ``loss_d0`` / ``render_3d_1`` / ``grid_2d`` / ``model_d42_final`` all yield a
+    spurious ``seed`` field that corrupts the D-09 eval-integrity signal. With
+    the alias removed and the retained aliases boundary-guarded, none of them
+    detect a seed, while a legitimate ``seed42`` token still does."""
+    from sample_grid.core.parse.filename import FilenameExtractor
+
+    prompt_dir = tmp_path / "p"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+
+    for stem in ("loss_d0", "render_3d_1", "grid_2d", "model_d42_final"):
+        f = prompt_dir / f"{stem}.png"
+        f.write_bytes(b"x")
+        out = FilenameExtractor(root=tmp_path).extract([f])
+        (fields,) = out.values()
+        assert "seed" not in fields, f"{stem} spuriously produced a seed"
+
+    # Control: the retained ``seed`` alias still fires at a token boundary.
+    control = prompt_dir / "step_600_seed42.png"
+    control.write_bytes(b"x")
+    ctl_out = FilenameExtractor(root=tmp_path).extract([control])
+    (ctl_fields,) = ctl_out.values()
+    assert ctl_fields["seed"].value == 42
+    assert ctl_fields["step"].value == 600
+
+
 # ---------------------------------------------------------------------------
 # Plan 02-04 Task 1: template DSL → regex over the relative posix path (META-04).
 # ---------------------------------------------------------------------------
