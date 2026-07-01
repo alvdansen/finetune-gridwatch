@@ -140,6 +140,34 @@ def unpadded_step_folder(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def unclassifiable_folder(tmp_path: Path) -> Path:
+    """A folder mixing one classifiable file with one auto-detect can't place.
+
+    ``a_lake/step_600.png`` parses cleanly (step + prompt); ``a_lake/notes.png``
+    has NO integer in its stem, so the auto-detect picker cannot derive a step
+    and must skip-and-count it (D-05). Returns the folder to point the parser at.
+    """
+    outputs = tmp_path / "unclassifiable"
+    _write_png(outputs / "a_lake" / "step_600.png", (40, 60, 90))
+    _write_png(outputs / "a_lake" / "notes.png", (90, 40, 60))
+    return outputs
+
+
+@pytest.fixture
+def aitoolkit_style_folder(tmp_path: Path) -> Path:
+    """An ai-toolkit-style sample folder (A2): ``{ts}__{step:09d}_{idx}.jpg``.
+
+    The step is zero-padded to 9 digits; the trailing small int is the prompt
+    sample index (surfaced honestly as an integer prompt, NO index→text
+    resolution). Returns the folder to point the parser at.
+    """
+    outputs = tmp_path / "aitoolkit"
+    _write_png(outputs / "job" / "20260630__000000600_3.jpg", (30, 50, 70))
+    _write_png(outputs / "job" / "20260630__000001200_3.jpg", (30, 50, 70))
+    return outputs
+
+
+@pytest.fixture
 def xss_prompt_index(tmp_path: Path) -> SampleIndex:
     """A hand-built index whose prompt dimension carries HTML metacharacters.
 

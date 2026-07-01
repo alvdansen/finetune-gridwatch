@@ -3,9 +3,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 runner = CliRunner()
+
+
+# Scaffolds implemented in Task 3 (kept skipped so collection stays green
+# while Tasks 1-2 land the detection core).
+@pytest.mark.skip(reason="implemented in Task 3 (grid detect + silent build)")
+def test_detect_reports() -> None:  # pragma: no cover - placeholder
+    raise NotImplementedError
+
+
+@pytest.mark.skip(reason="implemented in Task 3 (grid detect + silent build)")
+def test_build_silent() -> None:  # pragma: no cover - placeholder
+    raise NotImplementedError
 
 
 def test_build_writes_html(dense_sample_folder: Path, tmp_path: Path) -> None:
