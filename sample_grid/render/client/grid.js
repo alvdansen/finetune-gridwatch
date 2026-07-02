@@ -101,11 +101,31 @@
     duration: 0, // common clip duration, learned from the first cell's metadata
     // clock: a performance.now()-based accumulator wrapped modulo duration. It is
     // purely virtual — no leader element — so it never consumes a WebMediaPlayer.
+    // The clock is PAUSABLE (WR-02): a virtual freeze must actually stop the
+    // master timeline. If it kept advancing while the grid is frozen, a cell that
+    // scrolls out and back would re-seek to a LATER master frame than its
+    // untouched siblings (silent desync), and Pause all → Play visible would
+    // resume at the advanced phase instead of the frozen frame (forward jump).
+    // When paused, position() returns the frozen frame; resume() re-anchors origin
+    // so the timeline continues from exactly where it froze.
     clock: {
       origin: nowMs(),
+      paused: false,
+      frozenPos: 0,
       position: function () {
         if (!manager.duration) return 0; // duration unknown yet → phase 0
+        if (this.paused) return this.frozenPos; // frozen: hold the frame across the grid
         return ((nowMs() - this.origin) / 1000) % manager.duration;
+      },
+      pause: function () {
+        if (this.paused) return;
+        this.frozenPos = this.position(); // capture the live frame before freezing
+        this.paused = true;
+      },
+      resume: function () {
+        if (!this.paused) return;
+        this.origin = nowMs() - this.frozenPos * 1000; // continue from the frozen frame
+        this.paused = false;
       }
     },
     track: function (cell) { this.untrack(cell); this.playing.push(cell); },
@@ -141,12 +161,14 @@
     if (!this.playing.length) return;
     var cells = this.playing.slice(); // snapshot — _markPaused mutates the set
     var pos = isSynced() ? this.clock.position() : null; // master frame, read ONCE
+    if (pos !== null) this.clock.pause(); // WR-02: freeze the master timeline too
     for (var i = 0; i < cells.length; i++) {
       var v = cells[i].video;
       if (v) {
         if (pos !== null) { try { v.currentTime = pos; } catch (e) {} } // snap-on-pause
         v.pause();
       }
+      if (pos !== null) cells[i].frozenAt = pos; // record the frozen frame for re-entry
       cells[i]._markPaused();
     }
   };
@@ -252,9 +274,12 @@
     if (!this.attached) this.attach();
     if (!this.playing && manager.playing.length >= PLAY_CAP) manager.evictOldest();
     v.muted = true;
-    // Synced (D-06): jump to the shared master frame BEFORE play() so the cell
-    // joins the comparison in-phase; the drift tick keeps it locked thereafter.
+    // Synced (D-06): resume the frozen master timeline (WR-02) then jump to the
+    // shared master frame BEFORE play() so the cell joins the comparison in-phase
+    // and playback continues from the frozen frame, not an advanced phase; the
+    // drift tick keeps it locked thereafter.
     if (isSynced()) {
+      manager.clock.resume();
       try { v.currentTime = manager.clock.position(); } catch (e) {}
     }
     var self = this;
@@ -325,6 +350,7 @@
     if (!v) return;
     if (isSynced() && manager.playing.length) {
       var pos = manager.clock.position();
+      manager.clock.pause(); // WR-02: freeze the master timeline with the cells
       var cells = manager.playing.slice(); // snapshot: _markPaused mutates the set
       for (var i = 0; i < cells.length; i++) {
         var cv = cells[i].video;
@@ -332,6 +358,7 @@
           try { cv.currentTime = pos; } catch (e) {}
           cv.pause();
         }
+        cells[i].frozenAt = pos; // record the frozen frame for re-entry
         cells[i]._markPaused();
       }
     }
