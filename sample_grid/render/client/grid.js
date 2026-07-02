@@ -73,6 +73,12 @@
   // the current frame, re-enter restores it (Independent), never the poster.
   // Still vanilla and file://-safe: no network calls, no live-reload, no server.
   var PLAY_CAP = 12;
+  // Explicit ceiling on simultaneously-ATTACHED decoders (WR-01), independent of
+  // viewport + rootMargin geometry. A tall/large desktop viewport — or 144px cells
+  // + a 300px margin against the 40-player mobile cap — can otherwise hold more
+  // attached decoders than the browser WebMediaPlayer cap and black out cells.
+  // 30 sits comfortably under the 40 mobile cap and well above PLAY_CAP.
+  var ATTACH_CAP = 30;
   var FORCE_REJECT = /(?:^|[?&])forceRejectPlay=1(?:&|$)/.test(location.search);
 
   // window.__players = count of live (attached) decoders — the M5 observable
@@ -90,6 +96,7 @@
   // a frame index — so currentTime equality == frame-index equality across cells.
   var manager = {
     playing: [], // oldest first, so [0] is the eviction victim
+    attached: [], // ordered set of attached (decoder-holding) cells, oldest first
     fps: 24, // D-08 uniform-fps assumption; no probing (RESEARCH open Q locked)
     duration: 0, // common clip duration, learned from the first cell's metadata
     // clock: a performance.now()-based accumulator wrapped modulo duration. It is
@@ -105,6 +112,11 @@
     untrack: function (cell) {
       var i = this.playing.indexOf(cell);
       if (i !== -1) this.playing.splice(i, 1);
+    },
+    trackAttached: function (cell) { this.untrackAttached(cell); this.attached.push(cell); },
+    untrackAttached: function (cell) {
+      var i = this.attached.indexOf(cell);
+      if (i !== -1) this.attached.splice(i, 1);
     },
     // evictOldest(): free ONE concurrent-play slot when the cap is hit. It must
     // NOT route through VideoCell.pause(), whose Synced branch pauses EVERY
@@ -177,10 +189,23 @@
   VideoCell.prototype.attach = function () {
     var v = this.video;
     if (!v || this.attached) return;
+    // WR-01: enforce the attached-decoder ceiling BEFORE registering a new decoder.
+    // Detach the oldest attached-but-not-playing cell so window.__players can never
+    // climb past ATTACH_CAP on a large viewport. Playing cells stay attached
+    // (PLAY_CAP already bounds them well under ATTACH_CAP).
+    while (manager.attached.length >= ATTACH_CAP) {
+      var evictee = null;
+      for (var ai = 0; ai < manager.attached.length; ai++) {
+        if (!manager.attached[ai].playing) { evictee = manager.attached[ai]; break; }
+      }
+      if (!evictee) break; // every attached cell is playing — PLAY_CAP still bounds it
+      evictee.detach();
+    }
     v.muted = true;
     v.src = this.el.getAttribute("data-src"); // #t=0.001 paints the poster frame
     v.load();
     this.attached = true;
+    manager.trackAttached(this);
     window.__players++;
     var self = this;
     // One-shot metadata handler: (1) learn the common clip duration for the
@@ -214,6 +239,7 @@
     this.el.classList.remove("is-playing");
     this.el.setAttribute("aria-pressed", "false");
     manager.untrack(this);
+    manager.untrackAttached(this);
     window.__players--;
   };
 
