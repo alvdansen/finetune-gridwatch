@@ -400,6 +400,10 @@
       // Keyboard parity: Space/Enter on the focused cell toggles the same;
       // preventDefault on Space so the page never scrolls under the gesture.
       el.addEventListener("keydown", function (ev) {
+        // WR-03: keydown bubbles up from the focused ⧉ pop-out anchor. Let its
+        // native Enter navigation proceed WITHOUT also toggling this cell's
+        // playback (mirrors the pop-out's existing click stopPropagation guard).
+        if (ev.target.closest && ev.target.closest(".cell__popout")) return;
         if (ev.key === " " || ev.key === "Enter") {
           if (ev.key === " ") ev.preventDefault();
           cell.toggle();
