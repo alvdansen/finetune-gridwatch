@@ -7,7 +7,11 @@
 (function () {
   "use strict";
   var root = document.documentElement;
-  var STORE = { theme: "sg-theme", density: "sg-density" };
+  var STORE = { theme: "sg-theme", density: "sg-density", sync: "sg-sync" };
+
+  // Synced mode reads straight off the data-sync attribute the [data-set] loop
+  // flips; anything other than "synced" is Independent (the resting default).
+  var isSynced = function () { return root.getAttribute("data-sync") === "synced"; };
 
   // Restore the persisted theme/density (if any) on load.
   Object.keys(STORE).forEach(function (key) {
@@ -27,6 +31,7 @@
   }
   syncPressed("theme");
   syncPressed("density");
+  syncPressed("sync");
 
   // Wire each [data-set="key:value"] button: set the attribute, persist, sync.
   document.querySelectorAll("[data-set]").forEach(function (btn) {
@@ -74,9 +79,28 @@
   // that must stay bounded (well under the browser WebMediaPlayer cap).
   window.__players = 0;
 
-  // PlayerManager owns the currently-playing set + the concurrent-play cap.
+  // Monotonic ms source for the virtual master clock (no hidden leader <video>).
+  var nowMs = function () {
+    return (window.performance && performance.now) ? performance.now() : Date.now();
+  };
+
+  // PlayerManager owns the currently-playing set + the concurrent-play cap, plus
+  // the virtual master clock that drives Synced mode (MEDIA-03 / D-08). Because
+  // the clips are uniform in length + fps, clock position in seconds maps 1:1 to
+  // a frame index — so currentTime equality == frame-index equality across cells.
   var manager = {
     playing: [], // oldest first, so [0] is the eviction victim
+    fps: 24, // D-08 uniform-fps assumption; no probing (RESEARCH open Q locked)
+    duration: 0, // common clip duration, learned from the first cell's metadata
+    // clock: a performance.now()-based accumulator wrapped modulo duration. It is
+    // purely virtual — no leader element — so it never consumes a WebMediaPlayer.
+    clock: {
+      origin: nowMs(),
+      position: function () {
+        if (!manager.duration) return 0; // duration unknown yet → phase 0
+        return ((nowMs() - this.origin) / 1000) % manager.duration;
+      }
+    },
     track: function (cell) { this.untrack(cell); this.playing.push(cell); },
     untrack: function (cell) {
       var i = this.playing.indexOf(cell);
@@ -104,16 +128,23 @@
     v.load();
     this.attached = true;
     window.__players++;
-    // Independent semantics: restore the remembered frame (D-02), never reset
-    // to the poster. (Synced re-sync is Plan 03 — non-"synced" is Independent.)
-    if (this.frozenAt > 0 && root.getAttribute("data-sync") !== "synced") {
-      var self = this;
-      var seek = function () {
+    var self = this;
+    // One-shot metadata handler: (1) learn the common clip duration for the
+    // virtual master clock, then (2) position the cell on re-enter — the shared
+    // master frame in Synced mode (Pitfall 4 re-sync on scroll-back), else the
+    // remembered frame (D-02 Independent freeze). Never resets to the poster.
+    var onMeta = function () {
+      if (!manager.duration && isFinite(v.duration) && v.duration > 0) {
+        manager.duration = v.duration;
+      }
+      if (isSynced()) {
+        try { v.currentTime = manager.clock.position(); } catch (e) {}
+      } else if (self.frozenAt > 0) {
         try { v.currentTime = self.frozenAt; } catch (e) {}
-        v.removeEventListener("loadedmetadata", seek);
-      };
-      v.addEventListener("loadedmetadata", seek);
-    }
+      }
+      v.removeEventListener("loadedmetadata", onMeta);
+    };
+    v.addEventListener("loadedmetadata", onMeta);
   };
 
   // detach(): freeze the current frame, then release the WebMediaPlayer.
@@ -141,6 +172,11 @@
     if (!this.attached) this.attach();
     if (!this.playing && manager.playing.length >= PLAY_CAP) manager.evictOldest();
     v.muted = true;
+    // Synced (D-06): jump to the shared master frame BEFORE play() so the cell
+    // joins the comparison in-phase; the drift tick keeps it locked thereafter.
+    if (isSynced()) {
+      try { v.currentTime = manager.clock.position(); } catch (e) {}
+    }
     var self = this;
     var settle = function (ok) {
       self.playing = ok;
@@ -150,6 +186,7 @@
         self.el.setAttribute("aria-pressed", "true");
         self.el.removeAttribute("data-blocked");
         manager.track(self);
+        if (isSynced()) self.startDriftTick();
       } else {
         // D-11: keep the poster + ▶ and mark the cell — never a black/dead cell.
         self.el.classList.remove("is-playing");
@@ -168,16 +205,58 @@
     }
   };
 
-  // pause(): freeze on the current frame — do NOT reset currentTime. The ▶
-  // reappears (CSS drops .is-playing).
-  VideoCell.prototype.pause = function () {
-    var v = this.video;
+  // startDriftTick(): while this cell plays in Synced mode, re-lock it to the
+  // master clock once per painted frame. Prefer requestVideoFrameCallback (fires
+  // per decoded video frame); fall back to requestAnimationFrame where absent.
+  // TOL = one frame (1/fps), so a correction only fires past a full frame of
+  // drift — keeps every cell on the same frame index without thrashing.
+  VideoCell.prototype.startDriftTick = function () {
+    var self = this, v = this.video;
     if (!v) return;
-    v.pause();
+    var TOL = 1 / (manager.fps || 24);
+    var tick = function () {
+      if (!isSynced() || !self.playing || v.paused) return; // stop the loop
+      var target = manager.clock.position();
+      if (Math.abs(v.currentTime - target) > TOL) {
+        try { v.currentTime = target; } catch (e) {}
+      }
+      ("requestVideoFrameCallback" in v) ? v.requestVideoFrameCallback(tick) : requestAnimationFrame(tick);
+    };
+    ("requestVideoFrameCallback" in v) ? v.requestVideoFrameCallback(tick) : requestAnimationFrame(tick);
+  };
+
+  // _markPaused(): reflect the paused UI state for one cell (▶ reappears as CSS
+  // drops .is-playing) and drop it from the playing set. currentTime is left
+  // untouched here — freeze-on-frame (D-02).
+  VideoCell.prototype._markPaused = function () {
     this.playing = false;
     this.el.classList.remove("is-playing");
     this.el.setAttribute("aria-pressed", "false");
     manager.untrack(this);
+  };
+
+  // pause(): freeze on the current frame — do NOT reset currentTime. The ▶
+  // reappears (CSS drops .is-playing). In Synced mode a pause is frame-locked:
+  // read the master position ONCE and snap EVERY playing cell to it before
+  // pausing them all, so the comparison moment is the same frame index across
+  // the grid (D-02 / D-06).
+  VideoCell.prototype.pause = function () {
+    var v = this.video;
+    if (!v) return;
+    if (isSynced() && manager.playing.length) {
+      var pos = manager.clock.position();
+      var cells = manager.playing.slice(); // snapshot: _markPaused mutates the set
+      for (var i = 0; i < cells.length; i++) {
+        var cv = cells[i].video;
+        if (cv) {
+          try { cv.currentTime = pos; } catch (e) {}
+          cv.pause();
+        }
+        cells[i]._markPaused();
+      }
+    }
+    v.pause();
+    this._markPaused();
   };
 
   VideoCell.prototype.toggle = function () {
