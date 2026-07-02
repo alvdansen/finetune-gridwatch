@@ -308,3 +308,42 @@ def test_build_grid_from_handbuilt_index(tmp_path: Path) -> None:
     assert len(_flat(grid)) == 2 * 2  # fixed lattice from the contract alone
     assert sum(1 for c in _flat(grid) if c.state == CellState.POPULATED) == 3
     assert sum(1 for c in _flat(grid) if c.state == CellState.MISSING) == 1
+
+
+def test_video_sample_populates_not_broken(tmp_path: Path) -> None:
+    """Video cells must reach POPULATED through build_grid (MEDIA-01).
+
+    ``is_decodable``/``_ar_of`` use Pillow, which cannot open .mp4/.webm — so
+    before the fix every video sample fell into the ``elif not is_decodable``
+    arm and classified as BROKEN, and the render template's video branch (which
+    keys on POPULATED + media_type == "video") never fired. A video is decided
+    decodable at runtime by the browser, so build_grid must classify it POPULATED
+    here (with no Pillow-based ar_mismatch). Regression guard for the end-to-end
+    build pipeline the headless render tests don't exercise.
+    """
+    fixture = Path("tests/fixtures/tiny.mp4")
+    index = [
+        Sample(id="p/step_100.mp4", path=fixture, media_type="video",
+               dims={"step": 100, "prompt": "p"}),
+    ]
+    cell = build_grid(index, GridConfig()).cells[0][0]
+
+    assert cell.state == CellState.POPULATED  # was BROKEN before the fix
+    assert cell.sample.media_type == "video"
+    assert cell.ar_mismatch is False  # no Pillow AR probe for video
+
+
+def test_mixed_image_and_video_grid_all_populated(tmp_path: Path) -> None:
+    """A mixed image+video grid populates BOTH cell types (no video → BROKEN)."""
+    index = [
+        Sample(id="p/step_100.png", path=_png(tmp_path, "p/step_100.png"),
+               media_type="image", dims={"step": 100, "prompt": "p"}),
+        Sample(id="p/step_100.mp4", path=Path("tests/fixtures/tiny.mp4"),
+               media_type="video", dims={"step": 100, "prompt": "q"}),
+    ]
+    grid = build_grid(index, GridConfig())
+    populated = [c for c in _flat(grid) if c.state == CellState.POPULATED]
+
+    assert len(populated) == 2
+    assert {c.sample.media_type for c in populated} == {"image", "video"}
+    assert not any(c.state == CellState.BROKEN for c in _flat(grid))

@@ -142,15 +142,22 @@ def build_grid(index: SampleIndex, config: GridConfig) -> GridModel:
         for col in col_values:
             coord = (row, col)
             sample = by_coord.get(coord)
+            is_video = sample is not None and sample.media_type == "video"
             if sample is None:
                 # Absent coordinate — never skipped (Pitfall 1). (D-09)
                 row_cells.append(Cell(CellState.MISSING))
-            elif not is_decodable(sample.path):
+            elif not is_video and not is_decodable(sample.path):
                 # File present but won't decode → BROKEN, sample retained. (D-10)
+                # Video decodability can't be probed with Pillow — it is decided at
+                # runtime by the browser (a won't-play clip degrades to poster +
+                # data-blocked via the Plan 02 play() fallback, D-10), so a video
+                # sample is always POPULATED here rather than falsely BROKEN.
                 row_cells.append(Cell(CellState.BROKEN, sample=sample))
             else:
                 # Populated; flag a stray aspect ratio for letterbox fallback (D-11)
                 # and surface any duplicate-seed alternates on this cell (D-10/D-09).
+                # Video AR can't be read without ffprobe (ffmpeg is out of scope this
+                # phase) — object-fit: cover handles video framing, so no mismatch.
                 seed = sample.dims.get("seed")
                 if seed is not None:
                     cross_cell_seeds.add(seed)
@@ -159,7 +166,7 @@ def build_grid(index: SampleIndex, config: GridConfig) -> GridModel:
                     Cell(
                         CellState.POPULATED,
                         sample=sample,
-                        ar_mismatch=_ar_of(sample.path) != cell_ar,
+                        ar_mismatch=(False if is_video else _ar_of(sample.path) != cell_ar),
                         has_alternates=alt is not None,
                         alternate_seeds=alt if alt is not None else [],
                     )
