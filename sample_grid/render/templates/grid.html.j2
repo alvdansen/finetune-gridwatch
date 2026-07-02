@@ -1,3 +1,4 @@
+{% import "cell.j2" as c -%}
 <!DOCTYPE html>
 <html lang="en" data-theme="dark" data-density="comfortable" data-sync="independent">
 <head>
@@ -82,7 +83,7 @@
       {# Corner cell + column (prompt) headers — sticky top #}
       <div class="corner" role="columnheader">step ╲ prompt</div>
       {% for prompt in prompts %}
-      <div class="col-header" role="columnheader" data-c="{{ loop.index0 }}" title="{{ prompt }}" aria-label="{{ prompt }}">{{ prompt }}</div>
+      {{ c.col_header(prompt, loop.index0) }}
       {% endfor %}
 
       {# One dense row per step; row-header (left, sticky) then a cell per prompt.
@@ -90,71 +91,19 @@
          shared row + column on hover/focus (crosshair scan aid). #}
       {% for row in rows %}
       {% set row_i = loop.index0 %}
-      <div class="row-header" role="rowheader" data-r="{{ row_i }}">{{ row.step }}</div>
-      {% for item in row.cells %}
-        {% if item.cell.state == POPULATED %}
-          {% if item.cell.sample.media_type == "video" %}
-      {# Video cell (MEDIA-01): a DIV, NOT an anchor — full-cell click is
-         play/pause in Plan 02. The <video> carries NO eager src; the client
-         attaches `data-src` on first play. The poster is the clip's OWN first
-         frame via the `#t=0.001` media fragment (no ffmpeg / no generated
-         thumbnails, D-10). `#t=0.001` is a STATIC in-template literal — never
-         user data (Pitfall 5); every dynamic value stays autoescaped in {{ }}. #}
-      <div class="cell cell--video{% if item.cell.ar_mismatch %} cell--mismatch{% endif %}"
-           data-r="{{ row_i }}" data-c="{{ loop.index0 }}"
-           data-video data-src="{{ url(item.cell.sample) }}#t=0.001"
-           role="button" tabindex="0" aria-pressed="false"
-           aria-label="Play/pause — step {{ row.step }}, {{ item.prompt }}"
-           title="step {{ row.step }} · {{ item.prompt }}">
-        <video muted playsinline loop preload="none" aria-hidden="true"></video>
-        <span class="cell__play" aria-hidden="true">▶</span>
-        {# Pop-out (D-05): opens the RAW clip in a new tab using the CLEAN url
-           (NO `#t=` poster fragment). rel=noopener noreferrer blocks reverse
-           tabnabbing on the new tab (T-3-03), identical to the image anchor. #}
-        <a class="cell__popout" href="{{ url(item.cell.sample) }}"
-           target="_blank" rel="noopener noreferrer"
-           aria-label="Open clip in new tab">⧉</a>
-        {% if item.cell.has_alternates %}
-        <span class="cell__alt-badge"
-              title="Alternate seeds: {{ item.cell.alternate_seeds | join(', ') }}">alt</span>
-        {% endif %}
-      </div>
-          {% else %}
-      <a class="cell{% if item.cell.ar_mismatch %} cell--mismatch{% endif %}"
-         data-r="{{ row_i }}" data-c="{{ loop.index0 }}"
-         href="{{ url(item.cell.sample) }}" target="_blank" rel="noopener noreferrer"
-         title="step {{ row.step }} · {{ item.prompt }}">
-        <img src="{{ url(item.cell.sample) }}" alt="step {{ row.step }}, {{ item.prompt }}"
-             loading="lazy" decoding="async">
-        {# Duplicate-seed alternate badge (D-10/D-09): only on cells where >1
-           sample collided at this coordinate. Every seed value is interpolated
-           through autoescaped {{ }} — never string-concatenated in Python. #}
-        {% if item.cell.has_alternates %}
-        <span class="cell__alt-badge"
-              title="Alternate seeds: {{ item.cell.alternate_seeds | join(', ') }}">alt</span>
-        {% endif %}
-      </a>
-          {% endif %}
-        {% elif item.cell.state == BROKEN %}
-      {# Broken: file present but won't decode — amber, solid, ⚠ (D-10). Not clickable. #}
-      <div class="cell cell--broken" data-r="{{ row_i }}" data-c="{{ loop.index0 }}"
-           title="File found but couldn't be displayed — {{ item.cell.sample.path.name }}">
-        <span class="cell__glyph" aria-hidden="true">⚠</span>
-        <span class="cell__caption">Can't render</span>
-      </div>
-        {% else %}
-      {# Missing: nothing was ever here — cold, dashed, em dash (D-09). Not clickable. #}
-      <div class="cell cell--missing" data-r="{{ row_i }}" data-c="{{ loop.index0 }}"
-           title="No sample for step {{ row.step }} · {{ item.prompt }}">
-        <span class="cell__glyph" aria-hidden="true">—</span>
-        <span class="cell__caption">s{{ row.step }}·{{ item.prompt }}</span>
-      </div>
-        {% endif %}
-      {% endfor %}
+      {{ c.row_header(row.step, row_i) }}
+      {% for item in row.cells %}{{ c.cell(item, row_i, loop.index0, row.step, item.prompt, url, POPULATED, MISSING, BROKEN) }}{% endfor %}
       {% endfor %}
     </div>
   </div>
 
+  {# Live gate (RUN-02): only when SERVING live does the page carry the
+     LIVE_ENDPOINT constant the client's EventSource wiring keys on. On the
+     frozen/build path (live=False) NOTHING is injected, so the artifact stays
+     file://-safe with no server surface (locked by
+     test_toggle_js_inlined_offline_safe / test_live_flag_gates_eventsource).
+     The endpoint literal is a STATIC in-template value — no user data. #}
+  {% if live %}<script>window.LIVE_ENDPOINT = "/events";</script>{% endif %}
   {# Inlined client JS (static, trusted) — marked `safe` for the same reason as
      css above: inside a <script> block the browser does not decode entities, so
      autoescaping its `>` / `"` would break the script. It is vanilla and
