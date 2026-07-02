@@ -424,4 +424,51 @@
   if (playVisibleBtn) {
     playVisibleBtn.addEventListener("click", function () { manager.playVisible(); });
   }
+
+  // ── Row/column crosshair (comparison scan aid) ─────────────────────────────
+  // On hover/focus of a cell, light the shared row + column and their two sticky
+  // headers (data-r / data-c coordinates from the template) so the eye can trace
+  // one prompt down its steps / one step across its prompts. HIGHLIGHT-ONLY —
+  // grid.css never dims or filters media (dimming would fight the comparison).
+  // ONE delegated listener on the grid, not a handler per cell. Pointer-gated to
+  // real (hover: hover) devices so a tap never sticks the grid highlighted;
+  // keyboard focus lights it for everyone. State is instant; the transition is
+  // motion-gated in CSS. No network, no server wiring — file://-safe like the rest.
+  var grid = document.querySelector(".grid");
+  if (grid) {
+    var finePointer = window.matchMedia &&
+      window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+    var lit = [];
+    var clearHl = function () {
+      for (var i = 0; i < lit.length; i++) lit[i].classList.remove("is-hl");
+      lit = [];
+    };
+    var lightHl = function (r, c) {
+      clearHl();
+      // Cells carry both data-r and data-c; a header carries one. This selector
+      // gathers the whole row, the whole column, and the two axis headers.
+      var members = grid.querySelectorAll('[data-r="' + r + '"],[data-c="' + c + '"]');
+      for (var i = 0; i < members.length; i++) {
+        members[i].classList.add("is-hl");
+        lit.push(members[i]);
+      }
+    };
+    var lightFrom = function (target) {
+      var el = target && target.closest ? target.closest("[data-r],[data-c]") : null;
+      if (!el) return;
+      var r = el.getAttribute("data-r");
+      var c = el.getAttribute("data-c");
+      // A header supplies only one axis; fill the other with a sentinel that
+      // matches nothing, so hovering a header lights only its own row/column.
+      lightHl(r === null ? " " : r, c === null ? " " : c);
+    };
+    if (finePointer) {
+      grid.addEventListener("pointerover", function (ev) { lightFrom(ev.target); });
+      grid.addEventListener("pointerleave", clearHl);
+    }
+    grid.addEventListener("focusin", function (ev) { lightFrom(ev.target); });
+    grid.addEventListener("focusout", function (ev) {
+      if (!grid.contains(ev.relatedTarget)) clearHl(); // clear only when focus exits the grid
+    });
+  }
 })();

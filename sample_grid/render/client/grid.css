@@ -12,7 +12,7 @@
   --weight-regular: 400;
   --weight-semibold: 600;
   --radius-cell: 3px;
-  --radius-control: 6px;
+  --radius-control: 8px;
   --ring-width: 2px;
   --ring-offset: 2px;
   --z-cell: 1;
@@ -26,18 +26,21 @@
 /* ── Theme tokens — dark is the default eval ground (D-01) ────────────────── */
 :root,
 [data-theme="dark"] {
-  --ground: #0e0f11;
-  --header-surface: #1b1e22;
-  --cell-surface: #17191c;
+  --ground: #0c0c0e;                /* page field — one tonal step above the media well */
+  --header-surface: #16181b;        /* sticky headers + toolbar chrome        */
+  --cell-surface: #0a0a0b;          /* media well: darkest layer, so the SAMPLE is the brightest thing on screen */
+  --surface-hover: #202226;         /* raised surface on hover / crosshair emphasis */
   --text: #e6e8eb;
   --text-muted: #9aa0a6;
-  --hairline: rgba(255, 255, 255, 0.06);
+  --text-faint: rgba(255, 255, 255, 0.5);   /* tertiary hints — kept ≥ ~5:1 for small text */
+  --hairline: rgba(255, 255, 255, 0.07);
+  --hairline-strong: rgba(255, 255, 255, 0.22);  /* brightened cell edge on hover / crosshair arm */
   --missing-stroke: #3a3f45;        /* cold dashed border of a missing cell  */
   --missing-label: #5c636b;         /* faint em-dash + coordinate caption     */
   --broken-accent: #e0a458;         /* warm amber border + ⚠ glyph (status)  */
   --broken-fill: rgba(224, 164, 88, 0.07);  /* subtle amber wash behind broken */
-  --accent: #4f93ce;                /* interactive affordance ONLY (D-01)     */
-  --accent-contrast: #0e0f11;
+  --accent: #4f93ce;                /* interactive affordance ONLY (D-01) — kept: a distinctive steel, not the generic SaaS indigo */
+  --accent-contrast: #0a0a0b;
   --focus-ring: #6db0ec;
   --shadow: rgba(0, 0, 0, 0.55);    /* drop shadow under sticky headers       */
 }
@@ -48,9 +51,12 @@
   --ground: #f4f5f6;
   --header-surface: #e9ebed;
   --cell-surface: #ffffff;
+  --surface-hover: #dfe2e5;
   --text: #1a1c1e;
   --text-muted: #5f656b;
+  --text-faint: rgba(0, 0, 0, 0.5);
   --hairline: rgba(0, 0, 0, 0.08);
+  --hairline-strong: rgba(0, 0, 0, 0.28);
   --missing-stroke: #c2c7cc;
   --missing-label: #9aa0a6;
   --broken-accent: #b9701f;
@@ -64,7 +70,7 @@
 /* ── Density tokens — comfortable is the default (D-02) ───────────────────── */
 :root,
 [data-density="comfortable"] {
-  --gutter: 16px;
+  --gutter: 10px;
   --cell-size: 240px;       /* overridden by build-injected :root (CLI, D-08) */
   --row-header-w: 96px;
   --header-pad-x: 12px;
@@ -115,9 +121,9 @@ body {
   gap: 8px;
   padding: 8px;
   background: var(--header-surface);
-  border: 1px solid transparent; /* reserved so the synced accent border (D-07) adds no layout shift */
+  border: 1px solid var(--hairline); /* hairline at rest; the synced accent border (D-07) swaps in with no layout shift */
   border-radius: var(--radius-control);
-  box-shadow: 0 2px 8px -2px var(--shadow);
+  box-shadow: 0 1px 4px -1px var(--shadow); /* whisper of lift — depth is carried by the layered surface + hairline, not a heavy shadow */
 }
 
 .toggle-group {
@@ -177,6 +183,7 @@ body {
   display: none;
   font-size: 11px;
   line-height: 1.4;
+  letter-spacing: 0.06em;    /* uppercase SYNCED reads as a crisp status chip */
   align-self: center;
   padding: 4px 8px;
   border-radius: var(--radius-control);
@@ -251,6 +258,12 @@ body {
   overflow: auto;
   max-height: 100vh;
   padding: 24px;
+  /* Stepping row-by-row is THE core scan motion — proximity snap (never
+     mandatory) lets a flick land a full step-row cleanly under the sticky
+     header without fighting free scrolling. */
+  scroll-snap-type: y proximity;
+  scroll-padding-top: 44px;
+  overscroll-behavior: contain;
 }
 
 /* D-04: steps = rows, prompts = columns. The row-header column is rigid; every
@@ -306,9 +319,13 @@ body {
   font-family: var(--font-mono);
   font-size: var(--header-font-size);
   font-weight: var(--weight-semibold);
+  /* Tabular figures so step numbers form a true column the eye can scan. */
+  font-variant-numeric: tabular-nums;
   border-right: 1px solid var(--hairline);
   display: flex;
   align-items: center;
+  /* Each step-row is a proximity snap target (see .grid-scroll). */
+  scroll-snap-align: start;
 }
 
 /* Shadow-on-scroll cue (progressive enhancement). The scroll container gains
@@ -319,7 +336,8 @@ body {
   .col-header,
   .row-header,
   .corner {
-    transition: box-shadow var(--transition);
+    transition: box-shadow var(--transition), background var(--transition),
+      color var(--transition), border-color var(--transition);
   }
   .grid-scroll.is-scrolled-y .col-header,
   .grid-scroll.is-scrolled-y .corner {
@@ -340,9 +358,53 @@ body {
 .cell {
   aspect-ratio: var(--cell-ar);
   background: var(--cell-surface);
+  border: 1px solid var(--hairline);  /* hairline separation recovers density vs a wide gutter */
   border-radius: var(--radius-cell);
   overflow: hidden;
   display: block;
+}
+
+/* ── Cell hover + row/column crosshair (comparison scanning aid) ──────────────
+   On hover/focus of a cell, grid.js toggles `.is-hl` on every cell in the SAME
+   row and column plus their two sticky headers — so the eye can trace one prompt
+   down its steps, or one step across its prompts. HIGHLIGHT-ONLY: media is NEVER
+   dimmed or filtered (dimming would fight the very comparison it aids). The
+   accent lands only on the header chrome (a legitimate affordance surface); media
+   cells brighten just their neutral hairline. The ▶ and synced-border accent
+   semantics are untouched. State applies instantly; only the transition (on .cell
+   above / headers) is motion-gated. JS gates activation to (hover: hover) pointers
+   so touch never sticks in a highlighted state. */
+.cell--video.is-hl,
+a.cell.is-hl {
+  border-color: var(--hairline-strong);
+}
+
+.col-header.is-hl,
+.row-header.is-hl {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.col-header.is-hl {
+  border-bottom-color: var(--accent);
+}
+
+.row-header.is-hl {
+  border-right-color: var(--accent);
+}
+
+/* Lone hover/focus on a populated media cell brightens its own hairline (so it
+   reads even outside the crosshair). NO transform/scale — scaling a video frame
+   blurs the exact pixels being judged and z-fights neighbours. */
+.cell--video:hover,
+a.cell:hover {
+  border-color: var(--hairline-strong);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cell {
+    transition: border-color var(--transition);
+  }
 }
 
 /* Populated cells are anchors (click-to-open native, D-12): hint with a
