@@ -74,15 +74,69 @@ def test_media_confined(tmp_path: Path) -> None:
     assert "top secret" not in resp.text
 
 
+def _events_response_start(app) -> dict:
+    """Drive ``GET /events`` at the ASGI layer and capture ``http.response.start``.
+
+    A live SSE stream never ends on its own, so a ``TestClient`` stream would block
+    its own close (the server generator parks on ``queue.get()``). Instead we speak
+    ASGI directly and answer the stream's disconnect probe with ``http.disconnect``
+    so the endpoint terminates deterministically — capturing the status + headers
+    that carry the ``text/event-stream`` content-type contract.
+    """
+    captured: dict = {}
+
+    async def _drive() -> None:
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/events",
+            "raw_path": b"/events",
+            "query_string": b"",
+            "root_path": "",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+            "server": ("127.0.0.1", 8000),
+        }
+        sent_request = False
+
+        async def receive():
+            nonlocal sent_request
+            if not sent_request:
+                sent_request = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            # The stream polls for disconnect — report one so it exits cleanly.
+            return {"type": "http.disconnect"}
+
+        async def send(message) -> None:
+            if message["type"] == "http.response.start":
+                captured["status"] = message["status"]
+                captured["headers"] = {
+                    k.decode().lower(): v.decode() for k, v in message["headers"]
+                }
+
+        await asyncio.wait_for(app(scope, receive, send), timeout=5.0)
+
+    asyncio.run(_drive())
+    return captured
+
+
 def test_events_broadcast(tmp_path: Path) -> None:
     """``/events`` is text/event-stream and a broadcast reaches a subscribed queue."""
     root = _served_root(tmp_path)
-    client, broadcaster = _make_client(root)
+    _, broadcaster = _make_client(root)
+    from sample_grid.live.server import build_app
 
-    # Content-type contract: the SSE stream must announce text/event-stream.
-    with client.stream("GET", "/events") as resp:
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith("text/event-stream")
+    app = build_app(root=root, page_html_getter=lambda: "<x>", broadcaster=broadcaster)
+
+    # Content-type contract: the SSE stream announces text/event-stream.
+    start = _events_response_start(app)
+    assert start.get("status") == 200
+    assert start.get("headers", {}).get("content-type", "").startswith(
+        "text/event-stream"
+    )
 
     # Broadcaster fan-out: a subscribed queue receives the JSON-encoded patch.
     async def _roundtrip() -> dict:
