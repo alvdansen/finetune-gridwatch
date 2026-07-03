@@ -152,6 +152,38 @@ def test_build_writes_html(dense_sample_folder: Path, tmp_path: Path) -> None:
     assert html.count("<img") == 6, f"expected 6 <img tags, found {html.count('<img')}"
 
 
+def test_watch_renders_current_state(dense_sample_folder: Path, tmp_path: Path) -> None:
+    """RUN-02 / D-04: ``grid watch <folder> --no-open --once`` renders the folder's
+    current state to grid-output/index.html as a SERVED, LIVE page — without
+    entering the blocking Uvicorn serve loop.
+
+    ``--once`` is the hidden test/non-blocking hook: it renders current state,
+    writes the build-layout artifact, and returns. The written page must be the
+    served live page — ``/media/`` URLs (ServedResolver) and the ``LIVE_ENDPOINT``
+    EventSource wiring (``live=True``) — one <img>/media reference per populated
+    cell (dense = 2 prompts x 3 steps = 6 populated coordinates).
+    """
+    from sample_grid.cli.main import app
+
+    out = tmp_path / "out"
+    result = runner.invoke(
+        app,
+        ["watch", str(dense_sample_folder), "-o", str(out), "--no-open", "--once"],
+    )
+
+    assert result.exit_code == 0, result.output
+
+    index_html = out / "grid-output" / "index.html"
+    assert index_html.exists(), f"expected {index_html} to be written"
+
+    html = index_html.read_text(encoding="utf-8")
+    # Served live page: LIVE_ENDPOINT wiring present (live=True) ...
+    assert "LIVE_ENDPOINT" in html
+    # ... and every populated cell points at the /media/ served route.
+    assert "/media/" in html
+    assert html.count("/media/") >= 6
+
+
 def test_build_empty_folder(tmp_path: Path) -> None:
     """Building an empty folder writes a valid empty-state page and exits 0."""
     from sample_grid.cli.main import app
