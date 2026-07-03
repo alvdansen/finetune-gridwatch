@@ -241,9 +241,16 @@ def test_toggle_js_inlined_offline_safe() -> None:
     # `scrollTop > 0`, which would be broken as `&gt;` inside a <script>.
     assert "scrollTop > 0" in html
     assert "&gt; 0" not in html
-    # No server / live-reload surface leaks into the Phase-1 artifact.
-    assert "EventSource" not in html
-    assert "LIVE_ENDPOINT" not in html
+    # No server / live-reload surface ACTIVATES in this live=False artifact. The
+    # live module now ships in grid.js, but every path is gated behind
+    # `if (LIVE_ENDPOINT)`; the endpoint constant is only injected by the server
+    # ({% if live %}), so with live=False the guard never fires and no
+    # EventSource opens. We assert the GATE is present (behavioral guard) and the
+    # injected constant assignment is absent (guard can never fire). Checking the
+    # bare token "LIVE_ENDPOINT" no longer works — grid.js references it by name
+    # inside the guard — so we assert on the injection assignment specifically.
+    assert "if (LIVE_ENDPOINT)" in html
+    assert 'window.LIVE_ENDPOINT = ' not in html
 
 
 def test_sync_toggle_present() -> None:
@@ -465,8 +472,14 @@ def test_player_js_inlined_and_offline_safe() -> None:
     assert "data-video" in html
     assert 'preload="none"' in html
 
-    # No server / live-reload / fetch surface leaks into the artifact.
-    assert "EventSource" not in html
+    # No server / live-reload / fetch surface ACTIVATES in this live=False
+    # artifact. The live module ships in grid.js but every EventSource path is
+    # gated behind `if (LIVE_ENDPOINT)`; the endpoint constant is server-injected
+    # ({% if live %}), so with live=False the guard never fires and no connection
+    # opens. Assert the gate is present and the injection assignment is absent —
+    # and no XHR/fetch surface leaks at all.
+    assert "if (LIVE_ENDPOINT)" in html
+    assert 'window.LIVE_ENDPOINT = ' not in html
     assert "fetch(" not in html
 
 
@@ -497,8 +510,16 @@ def test_live_flag_gates_eventsource() -> None:
     live_html = render(grid, RelativeResolver(), live=True)
     static_html = render(grid, RelativeResolver(), live=False)
 
-    assert "LIVE_ENDPOINT" in live_html
-    assert "LIVE_ENDPOINT" not in static_html
+    # The gated live module ships in grid.js on BOTH renders (it references
+    # window.LIVE_ENDPOINT by name inside its `if (LIVE_ENDPOINT)` guard), so the
+    # discriminating invariant is the INJECTION assignment, not the bare token:
+    # render(live=True) emits `window.LIVE_ENDPOINT = "/events"`; live=False must
+    # not — leaving the guard permanently unfired on the frozen artifact.
+    assert 'window.LIVE_ENDPOINT = "/events"' in live_html
+    assert 'window.LIVE_ENDPOINT = ' not in static_html
+    # The guard itself is present in the inlined client on both paths.
+    assert "if (LIVE_ENDPOINT)" in live_html
+    assert "if (LIVE_ENDPOINT)" in static_html
 
 
 def test_cell_fragment_matches_full_render() -> None:

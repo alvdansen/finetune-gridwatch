@@ -370,46 +370,62 @@
     if (this.playing) this.pause(); else this.play();
   };
 
-  var videoCells = document.querySelectorAll("[data-video]");
-  if (videoCells.length && "IntersectionObserver" in window) {
-    // rootMargin pre-attaches just-off-screen cells so a scrolled-to cell already
-    // shows its poster; threshold 0 fires as soon as any pixel enters/leaves.
-    var observer = new IntersectionObserver(function (entries) {
-      for (var i = 0; i < entries.length; i++) {
-        var cell = entries[i].target.__cell;
-        if (!cell) continue;
-        if (entries[i].isIntersecting) cell.attach();
-        else cell.detach();
-      }
-    }, { rootMargin: "300px 0px", threshold: 0 });
-
-    videoCells.forEach(function (el) {
-      var cell = new VideoCell(el);
-      el.__cell = cell;
-      observer.observe(el);
-
-      // A click anywhere on the cell toggles play/pause of THAT cell — except on
-      // the ⧉ pop-out anchor, whose native new-tab navigation must proceed
-      // (stopPropagation keeps its click from ever toggling playback).
-      var popout = el.querySelector(".cell__popout");
-      if (popout) {
-        popout.addEventListener("click", function (ev) { ev.stopPropagation(); });
-      }
-      el.addEventListener("click", function () { cell.toggle(); });
-
-      // Keyboard parity: Space/Enter on the focused cell toggles the same;
-      // preventDefault on Space so the page never scrolls under the gesture.
-      el.addEventListener("keydown", function (ev) {
-        // WR-03: keydown bubbles up from the focused ⧉ pop-out anchor. Let its
-        // native Enter navigation proceed WITHOUT also toggling this cell's
-        // playback (mirrors the pop-out's existing click stopPropagation guard).
-        if (ev.target.closest && ev.target.closest(".cell__popout")) return;
-        if (ev.key === " " || ev.key === "Enter") {
-          if (ev.key === " ") ev.preventDefault();
-          cell.toggle();
+  // The decoder-lifecycle observer is created whenever IntersectionObserver is
+  // available — NOT gated on there being video cells at load time — so a cell
+  // that arrives LATER via a live patch (applyPatch → registerVideoCell) still
+  // joins the SAME observer + master clock (D-08), even on a grid that started
+  // empty. rootMargin pre-attaches just-off-screen cells so a scrolled-to cell
+  // already shows its poster; threshold 0 fires as soon as any pixel crosses.
+  var observer = ("IntersectionObserver" in window)
+    ? new IntersectionObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) {
+          var cell = entries[i].target.__cell;
+          if (!cell) continue;
+          if (entries[i].isIntersecting) cell.attach();
+          else cell.detach();
         }
-      });
+      }, { rootMargin: "300px 0px", threshold: 0 })
+    : null;
+
+  // registerVideoCell(el): wire ONE [data-video] element into the runtime — a
+  // VideoCell, the shared IntersectionObserver, and the click / Space-Enter
+  // toggle handlers. Called from BOTH the load-time loop AND applyPatch (D-08)
+  // so a live-patched video cell is indistinguishable from a load-time one and
+  // attaches/plays through the very same lifecycle. Idempotent — a node already
+  // carrying __cell is never double-wired.
+  function registerVideoCell(el) {
+    if (!el || el.__cell) return el && el.__cell;
+    var cell = new VideoCell(el);
+    el.__cell = cell;
+    if (observer) observer.observe(el);
+
+    // A click anywhere on the cell toggles play/pause of THAT cell — except on
+    // the ⧉ pop-out anchor, whose native new-tab navigation must proceed
+    // (stopPropagation keeps its click from ever toggling playback).
+    var popout = el.querySelector(".cell__popout");
+    if (popout) {
+      popout.addEventListener("click", function (ev) { ev.stopPropagation(); });
+    }
+    el.addEventListener("click", function () { cell.toggle(); });
+
+    // Keyboard parity: Space/Enter on the focused cell toggles the same;
+    // preventDefault on Space so the page never scrolls under the gesture.
+    el.addEventListener("keydown", function (ev) {
+      // WR-03: keydown bubbles up from the focused ⧉ pop-out anchor. Let its
+      // native Enter navigation proceed WITHOUT also toggling this cell's
+      // playback (mirrors the pop-out's existing click stopPropagation guard).
+      if (ev.target.closest && ev.target.closest(".cell__popout")) return;
+      if (ev.key === " " || ev.key === "Enter") {
+        if (ev.key === " ") ev.preventDefault();
+        cell.toggle();
+      }
     });
+    return cell;
+  }
+
+  var videoCells = document.querySelectorAll("[data-video]");
+  if (videoCells.length && observer) {
+    videoCells.forEach(function (el) { registerVideoCell(el); });
   }
 
   // Wire the two global playback controls (MEDIA-04). These are plain ACTION
@@ -470,5 +486,123 @@
     grid.addEventListener("focusout", function (ev) {
       if (!grid.contains(ev.relatedTarget)) clearHl(); // clear only when focus exits the grid
     });
+  }
+
+  // ── Live watch (Phase 4 — RUN-04, D-01/D-02/D-07/D-08) ─────────────────────
+  // In-place DOM patching from server-rendered HTML. This entire module is INERT
+  // unless window.LIVE_ENDPOINT is injected ({% if live %} in grid.html.j2): the
+  // frozen/build artifact never sets it, so no EventSource ever opens — the page
+  // stays file://-safe with no dead controls (locked by the offline-safety
+  // tests). The client ONLY parses JSON and mutates the DOM; every scrap of
+  // cell/header markup is server-rendered (cell.j2 macros, autoescaped) and
+  // inserted verbatim — never constructed here, so applyPatch adds no injection
+  // surface beyond the already-escaped fragment (T-4-02).
+
+  // nodeFrom(html): materialize one server-rendered fragment into a live node
+  // via a <template> (parses the exact markup the full page shipped). Returns the
+  // first element, skipping the macro's leading indentation text nodes.
+  function nodeFrom(html) {
+    var t = document.createElement("template");
+    t.innerHTML = html;
+    return t.content.firstElementChild;
+  }
+
+  // renumberAttr(gridEl, attr, from): bump every existing data-r / data-c index
+  // >= from by one — an ATTRIBUTE-ONLY update on a mid-order insert so shifted
+  // rows/columns keep their exact DOM nodes (a currently-playing <video> keeps
+  // currentTime and its master-clock lock; D-07/D-08). MUST run BEFORE the new
+  // nodes (which already carry the target index) are inserted, so they are never
+  // double-incremented. The common append-at-end case matches nothing → no-op.
+  function renumberAttr(gridEl, attr, from) {
+    var nodes = gridEl.querySelectorAll("[" + attr + "]");
+    for (var i = 0; i < nodes.length; i++) {
+      var v = parseInt(nodes[i].getAttribute(attr), 10);
+      if (!isNaN(v) && v >= from) nodes[i].setAttribute(attr, String(v + 1));
+    }
+  }
+
+  // applyPatch(p): mutate the CSS-grid DOM in place from ONE canonical patch
+  // envelope (the exact shape 04-03 broadcasts over SSE). NEVER location.reload,
+  // NEVER constructs cell markup, NEVER re-src's a playing cell. Field-name
+  // contract: replace_cell carries `html`; insert_row/insert_col carry
+  // `header_html` + `cells`.
+  function applyPatch(p) {
+    var gridEl = document.querySelector(".grid");
+    if (!gridEl || !p || !p.op) return;
+
+    if (p.op === "replace_cell") {
+      // The slot already exists in the dense lattice → an in-place node swap:
+      // no insertion, no reflow, no scroll change (D-07 backfill-in-place). The
+      // [data-r][data-c] selector matches a CELL only (both attrs), never a
+      // single-axis header.
+      var target = gridEl.querySelector('[data-r="' + p.r + '"][data-c="' + p.c + '"]');
+      if (!target) return;
+      var node = nodeFrom(p.html);
+      if (!node) return;
+      target.replaceWith(node);
+      if (node.matches && node.matches("[data-video]")) registerVideoCell(node);
+      return;
+    }
+
+    if (p.op === "insert_row") {
+      // New step. Common case: the new step is the largest → rowRef is null →
+      // append below the fold, no existing cell moves (D-01 stay-put). Mid-order:
+      // insert before the row currently at p.index and renumber shifted rows
+      // attribute-only (no node recreation → playing videos survive).
+      var rowRef = gridEl.querySelector('.row-header[data-r="' + p.index + '"]');
+      renumberAttr(gridEl, "data-r", p.index);
+      var header = nodeFrom(p.header_html);
+      if (header) gridEl.insertBefore(header, rowRef); // rowRef null → appendChild
+      var cells = p.cells || [];
+      for (var i = 0; i < cells.length; i++) {
+        var cnode = nodeFrom(cells[i]);
+        if (!cnode) continue;
+        // Repeated insertBefore(_, rowRef) preserves header→cell0→cell1… order.
+        gridEl.insertBefore(cnode, rowRef);
+        if (cnode.matches && cnode.matches("[data-video]")) registerVideoCell(cnode);
+      }
+      return;
+    }
+
+    if (p.op === "insert_col") {
+      // New prompt (the rarest, fiddliest op). Grow the track, then insert the
+      // header + EXACTLY ONE cell into EVERY row atomically so auto-placement
+      // keeps 1 + n_cols children per row. References are captured under the OLD
+      // indexing FIRST (node identity is stable across the attribute-only
+      // renumber), then existing data-c >= index is bumped, then the new nodes
+      // (which already carry data-c = index) are inserted before the saved refs.
+      var cidx = p.index;
+      var entries = p.cells || [];
+      var headerRef = gridEl.querySelector('.col-header[data-c="' + cidx + '"]');
+      if (!headerRef) headerRef = gridEl.querySelector(".row-header"); // append after last header
+      var refs = [];
+      for (var j = 0; j < entries.length; j++) {
+        var r = entries[j].r;
+        var ref = gridEl.querySelector('[data-r="' + r + '"][data-c="' + cidx + '"]');
+        if (!ref) ref = gridEl.querySelector('.row-header[data-r="' + (r + 1) + '"]');
+        refs.push(ref || null); // null → append at grid end (the last row)
+      }
+      renumberAttr(gridEl, "data-c", cidx);
+      root.style.setProperty("--n-cols", p.n_cols); // gain one grid-template-columns track
+      var chead = nodeFrom(p.header_html);
+      if (chead) gridEl.insertBefore(chead, headerRef);
+      for (var k = 0; k < entries.length; k++) {
+        var enode = nodeFrom(entries[k].html);
+        if (!enode) continue;
+        gridEl.insertBefore(enode, refs[k]);
+        if (enode.matches && enode.matches("[data-video]")) registerVideoCell(enode);
+      }
+      return;
+    }
+  }
+
+  // Guarded live channel: opens the SSE stream ONLY when the server injected the
+  // endpoint. Absent (build/freeze) → this branch never runs, nothing connects.
+  var LIVE_ENDPOINT = window.LIVE_ENDPOINT || null;
+  if (LIVE_ENDPOINT) {
+    var es = new EventSource(LIVE_ENDPOINT);
+    es.onmessage = function (e) {
+      try { applyPatch(JSON.parse(e.data)); } catch (err) {}
+    };
   }
 })();
