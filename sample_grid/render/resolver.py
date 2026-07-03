@@ -8,6 +8,8 @@ with zero renderer change.
 """
 from __future__ import annotations
 
+import base64
+import mimetypes
 from pathlib import PurePosixPath
 from typing import Protocol, runtime_checkable
 from urllib.parse import quote
@@ -55,3 +57,25 @@ class ServedResolver:
 
     def url(self, s: Sample) -> str:
         return "/media/" + quote(s.id, safe="/")
+
+
+class InlineResolver:
+    """Opt-in single-file resolver (P5): embed each sample as a base64 ``data:`` URI.
+
+    A third sibling behind the SAME ``AssetResolver`` Protocol as
+    ``RelativeResolver`` / ``ServedResolver``, so ``render(grid, resolver,
+    live=False)`` consumes it with ZERO renderer, template, or JS change (proven
+    agnostic by ``test_renderer_resolver_agnostic``).
+
+    Intended for images / tiny grids ONLY — the ``freeze`` CLI guardrail degrades
+    to the relative folder bundle for video or oversized totals (CLAUDE.md: iOS
+    Safari base64 ``<video>`` is unreliable; ~33% inflation; total page weight is
+    the real limit). base64 sidesteps paths entirely, so no Windows backslash can
+    ever leak into ``src`` (Pitfall 3), and the ``data:`` URI lands inside an
+    autoescaped ``src`` / ``href`` — no ``| safe``, no XSS surface (T-5-05).
+    """
+
+    def url(self, s: Sample) -> str:
+        mime = mimetypes.guess_type(s.path.name)[0] or "application/octet-stream"
+        b64 = base64.b64encode(s.path.read_bytes()).decode("ascii")
+        return f"data:{mime};base64,{b64}"

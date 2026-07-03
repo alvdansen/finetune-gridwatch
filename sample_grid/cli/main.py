@@ -34,7 +34,11 @@ from sample_grid.render.renderer import (
     render_col_header_fragment,
     render_row_header_fragment,
 )
-from sample_grid.render.resolver import RelativeResolver, ServedResolver
+from sample_grid.render.resolver import (
+    InlineResolver,
+    RelativeResolver,
+    ServedResolver,
+)
 
 app = typer.Typer(
     add_completion=False,
@@ -201,6 +205,16 @@ def freeze(
         "--template",
         help="Override auto-detect: {prompt}/step_{step}_seed{seed}.mp4",
     ),
+    inline: bool = typer.Option(
+        False,
+        "--inline",
+        help="Opt-in single-file base64 export — images / tiny grids only.",
+    ),
+    max_inline_mb: float = typer.Option(
+        75.0,
+        "--max-inline-mb",
+        help="Degrade --inline to the folder bundle above this total media size.",
+    ),
 ) -> None:
     """Freeze FOLDER into a self-contained standalone bundle (EXPORT-01/EXPORT-02).
 
@@ -238,18 +252,58 @@ def freeze(
 
     grid = build_grid(index, GridConfig())
 
-    # Copy each populated sample into the relative bundle, keyed on its posix
-    # ``sample.id`` so identical basenames across prompts never collide. ``dest`` is
-    # built with pathlib (never string concat) and ``sample.id`` is scanner-confined,
-    # so no ``..`` can traverse out of assets/ (T-5-01).
-    resolver = RelativeResolver(assets_dir=ASSETS_DIRNAME)
-    for row in grid.cells:
-        for cell in row:
-            if cell.state == CellState.POPULATED and cell.sample is not None:
-                dest = out_dir / ASSETS_DIRNAME / Path(cell.sample.id)
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(cell.sample.path, dest)
+    populated = [
+        c
+        for row in grid.cells
+        for c in row
+        if c.state == CellState.POPULATED and c.sample is not None
+    ]
 
+    # SC-3 guardrail (T-5-04 DoS mitigation): --inline is a single-file base64
+    # opt-in for images / tiny grids ONLY. base64 video is unreliable (iOS Safari,
+    # ~33% inflation, ``#t=`` fragments on data: URIs) and a huge total crashes the
+    # tab, so ANY video cell OR a total over --max-inline-mb DEGRADES back to the
+    # folder bundle with a warning (degrade-to-folder is friendlier than a hard
+    # refuse — RESEARCH A3). base64 is never the default and never used for video.
+    if inline:
+        total = sum(c.sample.path.stat().st_size for c in populated)
+        has_video = any(c.sample.media_type == "video" for c in populated)
+        limit = max_inline_mb * 1024 * 1024
+        if has_video or total > limit:
+            reasons = []
+            if has_video:
+                reasons.append("it contains video")
+            if total > limit:
+                reasons.append(
+                    f"its total media size ({total / 1024 / 1024:.3f} MB) exceeds "
+                    f"--max-inline-mb ({max_inline_mb} MB)"
+                )
+            typer.echo(
+                "Warning: --inline single-file base64 is for images / tiny grids "
+                f"only, but {' and '.join(reasons)}. Falling back to the folder "
+                "bundle (relative assets/).",
+                err=True,
+            )
+            inline = False
+
+    if inline:
+        # Single-file mode: embed each sample as a base64 data: URI and copy NO
+        # assets — the whole page is self-contained in index.html.
+        resolver = InlineResolver()
+    else:
+        # DEFAULT folder-bundle path: copy each populated sample into the relative
+        # bundle, keyed on its posix ``sample.id`` so identical basenames across
+        # prompts never collide. ``dest`` is built with pathlib (never string
+        # concat) and ``sample.id`` is scanner-confined, so no ``..`` can traverse
+        # out of assets/ (T-5-01).
+        resolver = RelativeResolver(assets_dir=ASSETS_DIRNAME)
+        for cell in populated:
+            dest = out_dir / ASSETS_DIRNAME / Path(cell.sample.id)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(cell.sample.path, dest)
+
+    # SAME render seam for both modes — the renderer never learns which resolver
+    # it got (resolver-swap seam; test_renderer_resolver_agnostic).
     html_str = render(grid, resolver, live=False, cell_size_px=cell_size)
     index_path.write_text(html_str, encoding="utf-8")
 
