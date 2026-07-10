@@ -277,3 +277,37 @@ def test_freeze_inline_refuses_oversized(
     warning = result.output.lower()
     assert ("size" in warning) or ("max-inline-mb" in warning)
     assert "folder bundle" in warning
+
+
+def test_freeze_inline_webp_jpeg_mime(tmp_path: Path) -> None:
+    """SC-3 (format coverage): ``freeze --inline`` maps .jpeg/.webp to correct data: MIME.
+
+    The PNG inline path is covered by ``test_freeze_inline_images_only`` /
+    ``test_inline_resolver_data_uri``; ``.jpeg`` and ``.webp`` were only exercised at
+    the ``media_type_for`` classifier level (``test_scan.py``), never end-to-end through
+    freeze. A MIME-mapping regression (e.g. ``.webp`` inlined as ``image/png``) would
+    therefore slip past the suite. This builds a tiny grid of both formats, inlines it,
+    and asserts each emits a data: URI with the CORRECT image MIME and that NO relative
+    ``assets/`` bundle is written.
+    """
+    from PIL import Image
+
+    src = tmp_path / "src"
+    for prompt in ("a serene lake", "a quiet forest"):
+        d = src / prompt
+        d.mkdir(parents=True)
+        Image.new("RGB", (32, 24), (80, 120, 160)).save(d / "step_100.jpeg")
+        Image.new("RGB", (32, 24), (160, 120, 80)).save(d / "step_200.webp")
+
+    out = tmp_path / "out"
+    result = _freeze_args(src, out, "--inline")
+
+    assert result.exit_code == 0, result.output
+
+    html = (out / "grid-output" / "index.html").read_text(encoding="utf-8")
+    assert "data:image/jpeg;base64," in html, "expected inlined .jpeg as an image/jpeg data URI"
+    assert "data:image/webp;base64," in html, "expected inlined .webp as an image/webp data URI"
+
+    assert not (out / "grid-output" / "assets").exists(), (
+        "inline mode must copy no assets/ bundle"
+    )

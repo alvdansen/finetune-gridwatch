@@ -17,6 +17,21 @@ from urllib.parse import quote
 from sample_grid.core.model import Sample
 from sample_grid.util.paths import to_posix
 
+# Explicit MIME map for the media formats the tool supports. `mimetypes.guess_type`
+# is unreliable here: on Windows it depends on the registry, and the stdlib built-in
+# map only learned `.webp` in a recent Python, so guess_type disagrees across OSes and
+# across the 3.11–3.14 range CI covers. A wrong MIME on a base64 `data:` URI can stop
+# a browser from rendering the image, so we pin the formats we own and fall back to
+# guess_type only for anything unexpected.
+_MEDIA_MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+}
+
 
 @runtime_checkable
 class AssetResolver(Protocol):
@@ -76,6 +91,10 @@ class InlineResolver:
     """
 
     def url(self, s: Sample) -> str:
-        mime = mimetypes.guess_type(s.path.name)[0] or "application/octet-stream"
+        mime = (
+            _MEDIA_MIME.get(s.path.suffix.lower())
+            or mimetypes.guess_type(s.path.name)[0]
+            or "application/octet-stream"
+        )
         b64 = base64.b64encode(s.path.read_bytes()).decode("ascii")
         return f"data:{mime};base64,{b64}"
